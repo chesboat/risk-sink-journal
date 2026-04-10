@@ -148,29 +148,32 @@ const RiskScoreCard = ({ score, breakdown }) => {
         Risk Sink Score
       </h3>
 
-      <div className="grid grid-cols-2 gap-8">
-        {/* Left: Score */}
-        <div className="flex flex-col items-center justify-center">
+      <div className="flex flex-col gap-5">
+        {/* Score Circle */}
+        <div className="flex items-center gap-4">
           <div
-            className="relative w-32 h-32 rounded-full flex items-center justify-center"
+            className="relative w-20 h-20 rounded-full flex items-center justify-center flex-shrink-0"
             style={{
               background: `radial-gradient(circle, ${getScoreColor(score)}20 0%, transparent 70%)`,
             }}
           >
             <div
-              className="text-5xl font-bold font-mono"
+              className="text-3xl font-bold font-mono"
               style={{ color: getScoreColor(score) }}
             >
               {Math.round(score)}
             </div>
           </div>
-          <p className="text-xs font-medium mt-3 opacity-70">
-            {getScoreGrade(score)}
-          </p>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: getScoreColor(score) }}>
+              {getScoreGrade(score)}
+            </p>
+            <p className="text-xs opacity-50 mt-0.5">Overall Grade</p>
+          </div>
         </div>
 
-        {/* Right: Grade Breakdown */}
-        <div className="flex flex-col justify-center gap-4">
+        {/* Grade Breakdown */}
+        <div className="flex flex-col gap-3">
           {Object.entries(breakdown || {}).map(([key, percentage]) => (
             <div key={key}>
               <div className="flex justify-between items-center mb-1">
@@ -182,7 +185,7 @@ const RiskScoreCard = ({ score, breakdown }) => {
                 </span>
               </div>
               <div
-                className="h-2 rounded-full overflow-hidden"
+                className="h-1.5 rounded-full overflow-hidden"
                 style={{ background: 'var(--border)' }}
               >
                 <motion.div
@@ -681,13 +684,16 @@ export default function Dashboard({ state, openEditTrade }) {
         />
       </div>
 
-      {/* Risk Sink Score Card */}
-      <RiskScoreCard score={riskScore.score || 0} breakdown={riskScore.grades || {}} />
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-2 gap-6">
+      {/* Row 2: Risk Score (1/3) + Equity Curve (2/3) */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 2fr' }}>
+        <RiskScoreCard score={riskScore.score || 0} breakdown={riskScore.grades || {}} />
         <EquityCurveChart data={stats.equityCurve} />
+      </div>
+
+      {/* Row 3: Entry Performance + Recent Trades */}
+      <div className="grid grid-cols-2 gap-4">
         <EntryPerformance entries={entryPerformance} />
+        <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
       </div>
 
       {/* Account Health Cards */}
@@ -705,9 +711,6 @@ export default function Dashboard({ state, openEditTrade }) {
           ))}
         </div>
       </div>
-
-      {/* Recent Trades */}
-      <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
     </div>
   );
 }
