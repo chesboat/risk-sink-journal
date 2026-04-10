@@ -77,6 +77,7 @@ const StatCard = ({
   gradientClass = '',
   isHighlight = false,
   valueColor = null,
+  fullHeight = false,
 }) => {
   const displayValue = isAnimated ? value : Math.round(value * 100) / 100;
 
@@ -89,6 +90,7 @@ const StatCard = ({
       style={{
         background: 'var(--card)',
         borderColor: 'var(--border)',
+        ...(fullHeight ? { height: '100%' } : {}),
       }}
     >
       <div className="flex items-center justify-between mb-3">
@@ -858,8 +860,8 @@ export default function Dashboard({ state, openEditTrade }) {
       </div>
 
       {/* Stat Cards Grid */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="relative">
+      <div className="grid grid-cols-4 gap-4" style={{ alignItems: 'stretch' }}>
+        <div className="relative h-full">
           <StatCard
             icon={TrendingUp}
             label="Idea Win Rate"
@@ -868,6 +870,7 @@ export default function Dashboard({ state, openEditTrade }) {
             valueColor="var(--green)"
             subtitle={wrDiff !== 0 ? `${wrDiff > 0 ? '↑' : '↓'} ${Math.abs(wrDiff).toFixed(1)}% this week` : undefined}
             subtitleColor={wrDiff >= 0 ? 'var(--green)' : 'var(--red)'}
+            fullHeight
           />
           <motion.div
             className="absolute inset-0 rounded-[14px] pointer-events-none"
