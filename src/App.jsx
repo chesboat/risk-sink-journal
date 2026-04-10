@@ -94,12 +94,16 @@ export default function App() {
     setState(s => ({ ...s, trades: [...s.trades, trade] }))
     setShowModal(false)
     setEditTrade(null)
+    // If we were in detail view, stay there but clear stale ref
+    // If not, viewTrade is already null so this is a no-op
   }, [])
 
   const updateTrade = useCallback((trade) => {
     setState(s => ({ ...s, trades: s.trades.map(t => t.id === trade.id ? trade : t) }))
     setShowModal(false)
     setEditTrade(null)
+    // Update the viewTrade ref so detail view shows fresh data
+    setViewTrade(prev => prev?.id === trade.id ? trade : prev)
   }, [])
 
   const deleteTradeHandler = useCallback((id) => {

@@ -117,6 +117,13 @@ function JournalBlock({ title, icon: Icon, content, emptyText }) {
 // ═══════════════════════════════════════════════════
 
 export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
+  // Escape to go back — must be before any conditional returns (Rules of Hooks)
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === 'Escape') onBack() }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [onBack])
+
   if (!trade) return null
 
   const ideaResult = getIdeaResult(trade)
@@ -127,13 +134,6 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
   const tags = trade.tags || { mistakes: [], conditions: [], confirmations: [] }
   const hasTags = (tags.confirmations?.length || 0) + (tags.conditions?.length || 0) + (tags.mistakes?.length || 0) > 0
   const hasJournal = trade.thesis || trade.notes || trade.lesson
-
-  // Escape to go back
-  useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') onBack() }
-    window.addEventListener('keydown', handleEsc)
-    return () => window.removeEventListener('keydown', handleEsc)
-  }, [onBack])
 
   return (
     <div className="pb-16">

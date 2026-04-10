@@ -297,6 +297,7 @@ const EquityCurveChart = ({ data }) => {
           <YAxis
             tick={{ fontSize: 12 }}
             stroke="var(--text-dim)"
+            tickFormatter={(v) => `$${v >= 1000 ? (v/1000).toFixed(1) + 'k' : v}`}
           />
           <Tooltip
             contentStyle={{
@@ -308,7 +309,7 @@ const EquityCurveChart = ({ data }) => {
           />
           <Area
             type="monotone"
-            dataKey="equity"
+            dataKey="cumulative"
             stroke="var(--green)"
             strokeWidth={2}
             fillOpacity={1}
