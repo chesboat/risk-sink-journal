@@ -11,6 +11,12 @@ export const SETUPS = ['CISD', 'BOS', 'FVG', 'OB', 'Liquidity Sweep', 'EQ Level'
 export const EMOTIONS = ['Calm', 'Confident', 'Anxious', 'FOMO', 'Revenge', 'Frustrated'];
 export const QUALITIES = ['A+', 'A', 'B', 'C', 'D', 'F'];
 export const HEALTH_STATUSES = ['Eval', 'Funded', 'Near Payout', 'Damaged', 'Critical', 'Passed'];
+
+// ── Tag Categories (Tradezella-style) ──
+export const MISTAKES = ['Moved Stop', 'Early Entry', 'Late Entry', 'Oversized', 'FOMO Entry', 'No Plan', 'Chased', 'Revenge Trade', 'Wrong Session', 'Ignored Levels'];
+export const CONDITIONS = ['Trending', 'Ranging', 'Choppy', 'News Event', 'Low Volume', 'High Volume', 'Volatile', 'Pre-Market', 'Gap Up', 'Gap Down'];
+export const CONFIRMATIONS = ['BOS', 'CISD', 'FVG Fill', 'Order Block', 'Liquidity Sweep', 'EQ Level', 'Divergence', 'Volume Spike', 'Displacement', 'Inducement'];
+
 export const ENTRY_COLORS = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' };
 export const ENTRY_LABELS = { 1: 'E1 · 3R', 2: 'E2 · 4R', 3: 'E3 · 5R' };
 export const ENTRY_TARGETS = { 1: 3, 2: 4, 3: 5 };
@@ -99,7 +105,14 @@ export function createTrade(overrides = {}) {
     ],
     emotion: '',
     quality: '',
+    thesis: '',
+    notes: '',
     lesson: '',
+    tags: {
+      mistakes: [],
+      conditions: [],
+      confirmations: [],
+    },
     screenshot: null,
     createdAt: Date.now(),
     ...overrides,

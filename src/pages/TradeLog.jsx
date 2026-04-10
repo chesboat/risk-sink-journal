@@ -513,11 +513,11 @@ export default function TradeLog({
                   { key: 'instrument', label: 'Instrument' },
                   { key: 'session', label: 'Session' },
                   { key: 'setup', label: 'Setup' },
+                  { key: null, label: 'Tags' },
                   { key: null, label: 'Entries' },
                   { key: 'result', label: 'Result' },
                   { key: 'netR', label: 'Net R' },
                   { key: 'netPnl', label: 'Net P&L' },
-                  { key: null, label: 'Screenshot', align: 'center' },
                   { key: null, label: 'Actions', align: 'right' },
                 ].map((col, i) => (
                   <th
@@ -563,6 +563,28 @@ export default function TradeLog({
                     {trade.setup}
                   </td>
                   <td className="px-4 py-3">
+                    <div className="flex gap-1 flex-wrap max-w-[180px]">
+                      {[...(trade.tags?.confirmations || []), ...(trade.tags?.conditions || []), ...(trade.tags?.mistakes || [])].slice(0, 3).map((tag, ti) => {
+                        const isMistake = (trade.tags?.mistakes || []).includes(tag);
+                        const isConfirm = (trade.tags?.confirmations || []).includes(tag);
+                        return (
+                          <span key={ti} className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{
+                              background: isMistake ? 'var(--red-dim)' : isConfirm ? 'var(--green-dim)' : 'var(--blue-dim)',
+                              color: isMistake ? 'var(--red)' : isConfirm ? 'var(--green)' : 'var(--accent)',
+                            }}>
+                            {tag}
+                          </span>
+                        );
+                      })}
+                      {((trade.tags?.confirmations?.length || 0) + (trade.tags?.conditions?.length || 0) + (trade.tags?.mistakes?.length || 0)) > 3 && (
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                          +{((trade.tags?.confirmations?.length || 0) + (trade.tags?.conditions?.length || 0) + (trade.tags?.mistakes?.length || 0)) - 3}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
                     {renderEntryDots(trade.entries)}
                   </td>
                   <td className="px-4 py-3">
@@ -573,17 +595,6 @@ export default function TradeLog({
                   </td>
                   <td className="px-4 py-3">
                     {renderNetPnl(trade)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {trade.screenshot && (
-                      <button
-                        onClick={() => setLightboxImage(trade.screenshot)}
-                        className="inline-flex items-center justify-center p-2 rounded-lg transition-colors border-0 cursor-pointer"
-                        style={{ background: 'transparent', color: 'var(--text-muted)' }}
-                      >
-                        <Image className="w-4 h-4" />
-                      </button>
-                    )}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
