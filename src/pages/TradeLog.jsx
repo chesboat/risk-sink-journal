@@ -192,13 +192,9 @@ export default function TradeLog({
       );
     }
 
-    const es = entries.slice(0, 3);
-    const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W');
-    const rescue = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L');
-
     return (
       <div className="flex gap-1 items-center">
-        {es.map((entry, idx) => {
+        {entries.slice(0, 3).map((entry, idx) => {
           let bg = 'var(--text-muted)';
           let border = 'none';
           if (entry.triggered === false) {
@@ -217,7 +213,6 @@ export default function TradeLog({
             />
           );
         })}
-        {rescue && <span className="text-[10px] leading-none ml-0.5" title="Rescue — later entry caught the win">⚡</span>}
       </div>
     );
   };

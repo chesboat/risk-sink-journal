@@ -630,32 +630,26 @@ const MiniCalendar = ({ trades }) => {
                     </span>
                   )}
 
-                  {hasTrades && (() => {
-                    const es = data.entries.slice(0, 3)
-                    const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W')
-                    const rescue = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L')
-                    return (
-                      <div className="flex gap-[3px] mt-1.5 items-center">
-                        {es.map((e, j) => {
-                          if (!e.triggered) {
-                            return (
-                              <div key={j} className="rounded-full" style={{
-                                width: 6, height: 6,
-                                border: '1px solid var(--text-muted)', background: 'transparent',
-                              }} />
-                            )
-                          }
+                  {hasTrades && (
+                    <div className="flex gap-[3px] mt-1.5 items-center">
+                      {data.entries.slice(0, 3).map((e, j) => {
+                        if (!e.triggered) {
                           return (
                             <div key={j} className="rounded-full" style={{
                               width: 6, height: 6,
-                              background: e.result === 'W' ? 'var(--green)' : e.result === 'L' ? 'var(--red)' : 'var(--text-dim)',
+                              border: '1px solid var(--text-muted)', background: 'transparent',
                             }} />
                           )
-                        })}
-                        {rescue && <span className="text-[8px] leading-none ml-0.5" title="Rescue">⚡</span>}
-                      </div>
-                    )
-                  })()}
+                        }
+                        return (
+                          <div key={j} className="rounded-full" style={{
+                            width: 6, height: 6,
+                            background: e.result === 'W' ? 'var(--green)' : e.result === 'L' ? 'var(--red)' : 'var(--text-dim)',
+                          }} />
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -676,10 +670,6 @@ const MiniCalendar = ({ trades }) => {
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full" style={{ border: '1px solid var(--text-muted)', background: 'transparent' }} />
           <span className="text-[11px] opacity-50 font-medium">Not triggered</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px]">⚡</span>
-          <span className="text-[11px] opacity-50 font-medium">Rescue</span>
         </div>
       </div>
     </motion.div>
@@ -775,14 +765,6 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
                       style={{ background: bg }} />
                   );
                 })}
-                {(() => {
-                  const es = trade.entries || []
-                  const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W')
-                  const hadPriorLoss = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L')
-                  return hadPriorLoss ? (
-                    <span className="ml-0.5 text-[11px]" title="Risk sink rescue — later entry caught the win">⚡</span>
-                  ) : null
-                })()}
               </div>
 
               {/* Idea Result */}
