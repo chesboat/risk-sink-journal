@@ -31,9 +31,47 @@ export default function App() {
   const [showModal, setShowModal] = useState(false)
   const [editTrade, setEditTrade] = useState(null)
   const [sidebarHover, setSidebarHover] = useState(false)
+  const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured() ? 'syncing' : 'offline') // 'synced' | 'syncing' | 'offline'
+  const isInitialSync = useRef(true)
 
-  // Save on state change
+  // Save to localStorage on every state change
   useEffect(() => { saveState(state) }, [state])
+
+  // Supabase: pull on mount, merge with local
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return
+    setSyncStatus('syncing')
+    pullState().then(remote => {
+      if (!remote) { setSyncStatus('offline'); return }
+      setState(prev => {
+        const defaults = getDefaultState()
+        // Merge trades: remote wins for duplicates, keep unique locals
+        const remoteIds = new Set((remote.trades || []).map(t => t.id))
+        const uniqueLocal = prev.trades.filter(t => !remoteIds.has(t.id))
+        const mergedTrades = [...(remote.trades || []), ...uniqueLocal]
+        // Sort by date descending
+        mergedTrades.sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt)
+
+        return {
+          trades: mergedTrades,
+          accounts: remote.accounts || prev.accounts || defaults.accounts,
+          settings: { ...defaults.settings, ...(remote.settings || prev.settings) },
+        }
+      })
+      setSyncStatus('synced')
+      isInitialSync.current = false
+    })
+  }, [])
+
+  // Supabase: push full state after initial sync merges
+  useEffect(() => {
+    if (!isSupabaseConfigured() || isInitialSync.current) return
+    const timeout = setTimeout(() => {
+      setSyncStatus('syncing')
+      pushState(state).then(() => setSyncStatus('synced')).catch(() => setSyncStatus('offline'))
+    }, 1000) // debounce 1s
+    return () => clearTimeout(timeout)
+  }, [state])
 
   // Theme
   useEffect(() => {
@@ -61,8 +99,9 @@ export default function App() {
     setEditTrade(null)
   }, [])
 
-  const deleteTrade = useCallback((id) => {
+  const deleteTradeHandler = useCallback((id) => {
     setState(s => ({ ...s, trades: s.trades.filter(t => t.id !== id) }))
+    supaDeleteTrade(id) // fire and forget
   }, [])
 
   const updateAccounts = useCallback((accounts) => {
@@ -99,7 +138,7 @@ export default function App() {
   }
 
   const renderPage = () => {
-    const props = { state, openEditTrade, deleteTrade, updateAccounts, updateSettings }
+    const props = { state, openEditTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />
@@ -171,10 +210,19 @@ export default function App() {
 
         {/* Bottom actions */}
         <div className="mt-auto flex flex-col gap-2 items-center">
-          <button onClick={() => exportData(state)} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }} title="Export">
+          {isSupabaseConfigured() && (
+            <div className="p-2" title={syncStatus === 'synced' ? 'Synced to cloud' : syncStatus === 'syncing' ? 'Syncing...' : 'Offline — local only'}>
+              {syncStatus === 'offline' ? (
+                <CloudOff size={16} style={{ color: 'var(--text-muted)' }} />
+              ) : (
+                <Cloud size={16} style={{ color: syncStatus === 'synced' ? 'var(--green)' : 'var(--orange)' }} className={syncStatus === 'syncing' ? 'animate-pulse' : ''} />
+              )}
+            </div>
+          )}
+          <button onClick={() => exportData(state)} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Export">
             <Download size={16} />
           </button>
-          <button onClick={handleImport} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }} title="Import">
+          <button onClick={handleImport} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Import">
             <Upload size={16} />
           </button>
           <button
