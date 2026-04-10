@@ -341,8 +341,9 @@ export default function TradeModal({ trade, onSave, onClose }) {
     <motion.div
       className="fixed inset-0 z-[100] flex items-center justify-center"
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      animate={{ opacity: 1, pointerEvents: 'auto' }}
+      exit={{ opacity: 0, pointerEvents: 'none' }}
+      transition={{ duration: 0.15 }}
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <motion.div
