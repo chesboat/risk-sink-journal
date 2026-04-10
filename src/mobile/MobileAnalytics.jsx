@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from 'recharts'
+import { Info } from 'lucide-react'
 import { calcStats, calcRiskSinkLift, formatCurrency } from '../lib/store'
 
 const PERIODS = [
@@ -52,6 +53,7 @@ function Row({ label, value, color, bar }) {
 
 export default function MobileAnalytics({ state }) {
   const [period, setPeriod] = useState('all')
+  const [showLiftInfo, setShowLiftInfo] = useState(false)
   const stats = useMemo(() => calcStats(state.trades || [], period), [state.trades, period])
   const lift = useMemo(() => {
     // Apply same period filter as calcStats
@@ -200,8 +202,17 @@ export default function MobileAnalytics({ state }) {
       >
         <div className="flex items-center justify-between mb-2">
           <div>
-            <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-              Risk Sync Lift
+            <div className="flex items-center gap-1.5">
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Risk Sync Lift
+              </div>
+              <button
+                onClick={() => setShowLiftInfo(v => !v)}
+                className="flex items-center"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <Info size={12} />
+              </button>
             </div>
             <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
               vs single-account baseline
@@ -223,6 +234,30 @@ export default function MobileAnalytics({ state }) {
             </div>
           </div>
         </div>
+
+        {showLiftInfo && (
+          <div
+            className="rounded-xl p-3 mt-2 mb-1 text-[11px] leading-relaxed"
+            style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+          >
+            <div className="font-semibold mb-1.5" style={{ color: 'var(--text)' }}>How this is calculated</div>
+            <div className="mb-1.5">
+              Each idea can fire up to 3 entries across accounts (E1=Lucid, E2=Tradeify, E3=Topstep). If an earlier entry stops, later entries can still catch the move.
+            </div>
+            <div className="mb-1">
+              <b>With risk sync:</b> R and P&L from all entries that triggered.
+            </div>
+            <div className="mb-1">
+              <b>E1 only:</b> what you'd have made taking just the first entry.
+            </div>
+            <div className="mb-1">
+              <b>Lift:</b> the delta — what risk sync is adding vs single-account.
+            </div>
+            <div>
+              <b>Rescues:</b> ideas where E1 stopped but a later entry won.
+            </div>
+          </div>
+        )}
 
         {/* Comparison bars */}
         {(() => {

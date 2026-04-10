@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts'
-import { TrendingUp, Zap, Target, Smile, Shield } from 'lucide-react'
+import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
 import { calcStats, calcRiskSinkLift, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
 const COLORS = {
@@ -38,6 +38,8 @@ export default function Analytics({ state }) {
   // ════════════════════════════════════════════════════════════════════════
   // TAB 1: OVERVIEW
   // ════════════════════════════════════════════════════════════════════════
+  const [showLiftInfo, setShowLiftInfo] = useState(false)
+
   const OverviewTab = () => {
     // R distribution histogram
     const rBuckets = { '-3': 0, '-2': 0, '-1': 0, '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5+': 0 }
@@ -120,6 +122,13 @@ export default function Analytics({ state }) {
               <div className="flex items-center gap-2 mb-1">
                 <Shield size={16} style={{ color: COLORS.blue }} />
                 <h3 className="text-sm font-semibold text-white">Risk Sync Lift</h3>
+                <button
+                  onClick={() => setShowLiftInfo(v => !v)}
+                  className="opacity-50 hover:opacity-100 transition-opacity"
+                  title="What is this?"
+                >
+                  <Info size={14} className="text-white" />
+                </button>
               </div>
               <div className="text-xs text-white opacity-50">How much risk sync is adding vs E1-only</div>
             </div>
@@ -132,6 +141,30 @@ export default function Analytics({ state }) {
               </div>
             </div>
           </div>
+
+          {showLiftInfo && (
+            <div
+              className="rounded-xl p-4 mb-4 border text-xs text-white opacity-80 leading-relaxed"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            >
+              <div className="font-semibold mb-2 opacity-100">How this is calculated</div>
+              <div className="mb-2">
+                Every trade idea can trigger up to 3 entries across accounts (E1 = Lucid, E2 = Tradeify, E3 = Topstep). Risk sync means if an earlier entry stops out, later entries can still catch the move on another account.
+              </div>
+              <div className="mb-2">
+                <span className="font-semibold">With risk sync:</span> total R and P&L from all entries that actually triggered.
+              </div>
+              <div className="mb-2">
+                <span className="font-semibold">E1 only (baseline):</span> what you would have made if you only ever took the first entry and walked away after a stop.
+              </div>
+              <div className="mb-2">
+                <span className="font-semibold">Lift:</span> the difference — the extra R and dollars risk sync is earning you (or costing you) compared to single-account trading.
+              </div>
+              <div>
+                <span className="font-semibold">Rescues:</span> ideas where E1 stopped out but a later entry ended up winning — the core scenario risk sync is designed to capture.
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="rounded-xl p-4 border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
