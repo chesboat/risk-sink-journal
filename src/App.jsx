@@ -11,6 +11,8 @@ import Accounts from './pages/Accounts'
 import TradeModal from './components/TradeModal'
 import TradeDetailView from './pages/TradeDetailView'
 import AuthGate from './components/AuthGate'
+import MobileShell from './mobile/MobileShell'
+import { useIsMobile } from './mobile/useIsMobile'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -28,6 +30,7 @@ const pageTransition = {
 }
 
 export default function App() {
+  const { isMobile, forceDesktop } = useIsMobile()
   const [state, setState] = useState(loadState)
   const [page, setPage] = useState('dashboard')
   const [showModal, setShowModal] = useState(false)
@@ -219,6 +222,37 @@ export default function App() {
   }
   if (isSupabaseConfigured() && !user) {
     return <AuthGate />
+  }
+
+  // Mobile layout — separate component tree, same state
+  if (isMobile) {
+    return (
+      <>
+        <MobileShell
+          state={state}
+          openNewTrade={openNewTrade}
+          openEditTrade={openEditTrade}
+          deleteTrade={deleteTradeHandler}
+          updateAccounts={updateAccounts}
+          updateSettings={updateSettings}
+          toggleTheme={toggleTheme}
+          syncStatus={syncStatus}
+          supabaseConfigured={isSupabaseConfigured()}
+          user={user}
+          signOut={signOut}
+          forceDesktop={forceDesktop}
+        />
+        <AnimatePresence>
+          {showModal && (
+            <TradeModal
+              trade={editTrade}
+              onSave={editTrade ? updateTrade : addTrade}
+              onClose={() => { setShowModal(false); setEditTrade(null) }}
+            />
+          )}
+        </AnimatePresence>
+      </>
+    )
   }
 
   return (
