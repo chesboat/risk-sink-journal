@@ -689,7 +689,9 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
     );
   }
 
-  const recentTrades = trades.slice(-5).reverse();
+  const recentTrades = [...trades]
+    .sort((a, b) => new Date(b.date + 'T00:00:00') - new Date(a.date + 'T00:00:00'))
+    .slice(0, 5);
 
   return (
     <motion.div
