@@ -512,8 +512,8 @@ export function calcPooledHealth(trades, accounts, settings) {
     return a.ptPct > b.ptPct ? a : b
   }, null)
 
-  // Combined equity curve + max drawdown
-  // Sort trades chronologically and accumulate combined PnL across all triggered entries.
+  // Combined equity curve + per-account curves + max drawdown
+  // Sort trades chronologically and accumulate both combined and per-account state.
   const sorted = [...(trades || [])].sort((a, b) => {
     const da = new Date(a.date + 'T00:00:00').getTime()
     const db = new Date(b.date + 'T00:00:00').getTime()
@@ -521,15 +521,51 @@ export function calcPooledHealth(trades, accounts, settings) {
     return (a.createdAt || 0) - (b.createdAt || 0)
   })
   const startingCombined = accts.reduce((s, a) => s + (a.startingPnl || 0), 0)
+
+  // Per-account running state for building individual curves with trailing floor
+  const acctState = accts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    slot: a.slot,
+    running: a.startingPnl || 0,
+    peak: a.startingPnl || 0,
+  }))
+  const floorOf = (peak) => Math.min(0, peak - perAccountMll)
+  const accountCurves = acctState.map((st) => ({
+    id: st.id,
+    name: st.name,
+    slot: st.slot,
+    points: [
+      { date: null, pnl: st.running, peak: st.peak, floor: floorOf(st.peak) },
+    ],
+  }))
+
   let running = startingCombined
-  const curve = [{ date: null, combined: running }]
+  const initialCombinedFloor = acctState.reduce((s, st) => s + floorOf(st.peak), 0)
+  const curve = [{ date: null, combined: running, floor: initialCombinedFloor }]
   sorted.forEach((t) => {
     const dayDelta = (t.entries || []).reduce((s, e) => {
       if (!e.triggered) return s
+      const idx = acctState.findIndex((st) => st.slot === e.slot)
+      if (idx >= 0) {
+        acctState[idx].running += e.pnl || 0
+        if (acctState[idx].running > acctState[idx].peak) {
+          acctState[idx].peak = acctState[idx].running
+        }
+      }
       return s + (e.pnl || 0)
     }, 0)
     running += dayDelta
-    curve.push({ date: t.date, combined: running })
+    const combinedFloor = acctState.reduce((s, st) => s + floorOf(st.peak), 0)
+    curve.push({ date: t.date, combined: running, floor: combinedFloor })
+    acctState.forEach((st, idx) => {
+      accountCurves[idx].points.push({
+        date: t.date,
+        pnl: st.running,
+        peak: st.peak,
+        floor: floorOf(st.peak),
+      })
+    })
   })
 
   // Peak-to-trough drawdown (in dollars) across the combined curve
@@ -568,6 +604,8 @@ export function calcPooledHealth(trades, accounts, settings) {
     worst,
     best,
     curve,
+    accountCurves,
+    perAccountMll,
     maxDd,
     maxDdAt,
     maxDdPeak,

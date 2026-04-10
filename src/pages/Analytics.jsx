@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, AreaChart, Area, ReferenceLine, ComposedChart } from 'recharts'
 import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
 import { calcStats, calcPooledHealth, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
@@ -23,6 +23,7 @@ export default function Analytics({ state }) {
   const [activeTab, setActiveTab] = useState('overview')
   const [showPooledInfo, setShowPooledInfo] = useState(false)
   const [showMaxDdInfo, setShowMaxDdInfo] = useState(false)
+  const [curveView, setCurveView] = useState('combined')
   const stats = calcStats(state.trades, 'all')
 
   // Format percentage
@@ -173,8 +174,20 @@ export default function Analytics({ state }) {
               </div>
 
               <div className="font-semibold mb-2">Trailing MLL (per account)</div>
-              <div className="opacity-70">
+              <div className="opacity-70 mb-2">
                 Each account's floor = min($0, peak P&L − ${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}). The floor trails $-for-$ with profit and locks at $0 once peak hits +${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}. Account busts the moment current P&L drops below its floor.
+              </div>
+              <div className="font-mono text-[11px] opacity-70 grid grid-cols-1 gap-0.5">
+                {pooled.perAccount.map((a) => (
+                  <div key={a.id} className="flex justify-between gap-4">
+                    <span className="truncate">{a.name}</span>
+                    <span>
+                      Current <span style={{ color: a.totalPnl >= 0 ? COLORS.green : COLORS.red }}>{fmt(a.totalPnl)}</span>
+                      {' · '}Peak <span style={{ color: COLORS.green }}>${Math.round(a.peak).toLocaleString()}</span>
+                      {' · '}Floor <span style={{ color: COLORS.red }}>${Math.round(a.trailingFloor).toLocaleString()}</span>
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -221,6 +234,9 @@ export default function Analytics({ state }) {
                   </div>
                   <div className="text-lg font-bold font-mono mb-1" style={{ color: a.totalPnl >= 0 ? COLORS.green : COLORS.red }}>
                     {fmt(a.totalPnl)}
+                  </div>
+                  <div className="text-[10px] text-white opacity-50 font-mono">
+                    Peak ${Math.round(a.peak).toLocaleString()} · Floor ${Math.round(a.trailingFloor).toLocaleString()}
                   </div>
                   <div className="text-[10px] text-white opacity-50">
                     MLL used: {Math.round(a.mllUsedPct)}%
@@ -331,6 +347,168 @@ export default function Analytics({ state }) {
             </div>
           )}
         </motion.div>
+
+        {/* Equity Curve + Trailing Floor */}
+        {(() => {
+          const curveOptions = [
+            { id: 'combined', label: 'Combined' },
+            ...(pooled.accountCurves || []).map((c) => ({ id: c.id, label: c.name })),
+          ]
+          const selected = curveView === 'combined'
+            ? {
+                label: 'Combined',
+                points: (pooled.curve || []).map((p, i) => ({
+                  date: p.date || `T${i}`,
+                  pnl: p.combined,
+                  floor: p.floor,
+                })),
+                currentPnl: pooled.combinedPnl,
+                peak: pooled.currentCombinedPeak,
+                peakAt: pooled.currentCombinedPeakAt,
+                floor: (pooled.curve && pooled.curve.length > 0)
+                  ? pooled.curve[pooled.curve.length - 1].floor
+                  : 0,
+                mllInitial: pooled.pooledMll,
+              }
+            : (() => {
+                const src = (pooled.accountCurves || []).find((c) => c.id === curveView)
+                if (!src) return null
+                const last = src.points[src.points.length - 1] || { pnl: 0, peak: 0, floor: 0 }
+                const peakPoint = src.points.reduce((acc, p) => (p.peak > acc.peak ? p : acc), src.points[0] || { peak: 0 })
+                const acct = (pooled.perAccount || []).find((a) => a.id === curveView)
+                return {
+                  label: src.name,
+                  points: src.points.map((p, i) => ({
+                    date: p.date || `T${i}`,
+                    pnl: p.pnl,
+                    floor: p.floor,
+                  })),
+                  currentPnl: last.pnl,
+                  peak: last.peak,
+                  peakAt: peakPoint.date,
+                  floor: last.floor,
+                  mllInitial: (pooled.pooledMll / (pooled.perAccount.length || 1)),
+                  mllDistance: acct ? acct.mllDistance : 0,
+                  mllUsedPct: acct ? acct.mllUsedPct : 0,
+                }
+              })()
+          if (!selected) return null
+          const distanceToBust = curveView === 'combined'
+            ? pooled.pooledHeadroom
+            : selected.mllDistance
+          const mllPctLeft = curveView === 'combined'
+            ? pooled.pooledHeadroomPct
+            : Math.max(0, 100 - (selected.mllUsedPct || 0))
+          return (
+            <motion.div
+              className="rounded-2xl p-6 border"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+              {...tabTransition}
+            >
+              <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
+                <div>
+                  <h3 className="text-sm font-semibold text-white mb-1">
+                    Equity Curve + Trailing Floor
+                  </h3>
+                  <div className="text-xs text-white opacity-50">
+                    P&amp;L over time with the trailing MLL floor overlaid. Bust happens when the curve crosses the floor.
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: 'var(--surface)' }}>
+                  {curveOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => setCurveView(opt.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border-0 cursor-pointer transition-colors"
+                      style={{
+                        background: curveView === opt.id ? COLORS.blue : 'transparent',
+                        color: curveView === opt.id ? '#fff' : 'var(--text-muted)',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="rounded-lg p-3" style={{ background: 'var(--surface)' }}>
+                  <div className="text-[10px] uppercase tracking-wider text-white opacity-50">Current</div>
+                  <div className="text-lg font-bold font-mono" style={{ color: selected.currentPnl >= 0 ? COLORS.green : COLORS.red }}>
+                    {fmt(selected.currentPnl)}
+                  </div>
+                </div>
+                <div className="rounded-lg p-3" style={{ background: 'var(--surface)' }}>
+                  <div className="text-[10px] uppercase tracking-wider text-white opacity-50">Peak</div>
+                  <div className="text-lg font-bold font-mono" style={{ color: COLORS.green }}>
+                    ${Math.round(selected.peak || 0).toLocaleString()}
+                  </div>
+                  {selected.peakAt && (
+                    <div className="text-[10px] text-white opacity-40 font-mono">{selected.peakAt}</div>
+                  )}
+                </div>
+                <div className="rounded-lg p-3" style={{ background: 'var(--surface)' }}>
+                  <div className="text-[10px] uppercase tracking-wider text-white opacity-50">Floor</div>
+                  <div className="text-lg font-bold font-mono" style={{ color: COLORS.red }}>
+                    ${Math.round(selected.floor || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div className="rounded-lg p-3" style={{ background: 'var(--surface)' }}>
+                  <div className="text-[10px] uppercase tracking-wider text-white opacity-50">To Bust</div>
+                  <div className="text-lg font-bold font-mono" style={{ color: mllPctLeft > 66 ? COLORS.green : mllPctLeft > 33 ? COLORS.orange : COLORS.red }}>
+                    ${Math.round(distanceToBust || 0).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={selected.points} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+                  <defs>
+                    <linearGradient id="pnlGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={COLORS.blue} stopOpacity={0.4} />
+                      <stop offset="100%" stopColor={COLORS.blue} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" style={{ fontSize: '11px' }} />
+                  <YAxis stroke="var(--text-muted)" style={{ fontSize: '11px' }} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
+                    formatter={(value, name) => [fmt(value), name === 'pnl' ? 'P&L' : 'Floor']}
+                  />
+                  <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="2 2" />
+                  <Area
+                    type="monotone"
+                    dataKey="pnl"
+                    stroke={COLORS.blue}
+                    strokeWidth={2}
+                    fill="url(#pnlGrad)"
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="floor"
+                    stroke={COLORS.red}
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+              <div className="flex items-center gap-4 text-[11px] text-white opacity-60 mt-2">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-0.5" style={{ background: COLORS.blue }} />
+                  P&amp;L
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-0.5 border-t border-dashed" style={{ borderColor: COLORS.red, borderTopWidth: '2px' }} />
+                  Trailing floor (bust line)
+                </span>
+              </div>
+            </motion.div>
+          )
+        })()}
 
         {/* R Distribution */}
         <motion.div
