@@ -499,38 +499,47 @@ const MiniCalendar = ({ trades }) => {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
 
-  // Build daily PnL map
+  // Build daily PnL map (all trades, since 2-week view can span months)
   const dailyPnl = useMemo(() => {
     const map = {};
     (trades || []).forEach(t => {
-      const d = new Date(t.date);
-      if (d.getFullYear() === year && d.getMonth() === month) {
-        if (!map[t.date]) map[t.date] = { pnl: 0, count: 0, entries: [] };
-        map[t.date].pnl += getNetPnl(t);
-        map[t.date].count++;
-        t.entries.forEach(e => {
-          if (e.triggered && e.result) map[t.date].entries.push(e);
-        });
-      }
+      if (!map[t.date]) map[t.date] = { pnl: 0, count: 0, entries: [] };
+      map[t.date].pnl += getNetPnl(t);
+      map[t.date].count++;
+      t.entries.forEach(e => {
+        if (e.triggered && e.result) map[t.date].entries.push(e);
+      });
     });
     return map;
-  }, [trades, year, month]);
+  }, [trades]);
 
-  // Build grid (Monday-start)
-  const grid = useMemo(() => {
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startDow = (firstDay.getDay() + 6) % 7; // Mon=0
-    const daysInMonth = lastDay.getDate();
-    const cells = [];
-    for (let i = 0; i < startDow; i++) cells.push(null);
-    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-    while (cells.length % 7 !== 0) cells.push(null);
-    return cells;
-  }, [year, month]);
+  // Build 2-week grid: previous week + current week (Mon-Sun)
+  const twoWeeks = useMemo(() => {
+    const todayDate = new Date(year, month, now.getDate());
+    const dow = (todayDate.getDay() + 6) % 7; // Mon=0
+    const currentWeekStart = new Date(todayDate);
+    currentWeekStart.setDate(currentWeekStart.getDate() - dow);
+    const prevWeekStart = new Date(currentWeekStart);
+    prevWeekStart.setDate(prevWeekStart.getDate() - 7);
 
-  const weeks = [];
-  for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
+    const rows = [];
+    for (const weekStart of [prevWeekStart, currentWeekStart]) {
+      const row = [];
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + d);
+        row.push({
+          day: date.getDate(),
+          month: date.getMonth(),
+          year: date.getFullYear(),
+          dateStr: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+          inMonth: date.getMonth() === month,
+        });
+      }
+      rows.push(row);
+    }
+    return rows;
+  }, [year, month, now.getDate()]);
 
   const today = now.getDate();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
@@ -538,6 +547,12 @@ const MiniCalendar = ({ trades }) => {
 
   const prev = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const next = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+
+  const shortPnl = (v) => {
+    const abs = Math.abs(v);
+    const str = abs >= 1000 ? `$${(abs / 1000).toFixed(1)}k` : `$${Math.round(abs)}`;
+    return v >= 0 ? `+${str}` : `-${str}`;
+  };
 
   return (
     <motion.div
@@ -547,83 +562,101 @@ const MiniCalendar = ({ trades }) => {
       className="rounded-[14px] p-5 border"
       style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
     >
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold tracking-wide opacity-60" style={{ textTransform: 'uppercase' }}>{monthLabel}</h3>
-        <div className="flex gap-1">
-          <button onClick={prev} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--text-dim)' }}>
-            <ChevronLeft size={14} />
-          </button>
-          <button onClick={next} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--text-dim)' }}>
-            <ChevronRight size={14} />
-          </button>
-        </div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-xs font-semibold tracking-wide opacity-60" style={{ textTransform: 'uppercase' }}>
+          {monthLabel}
+        </h3>
       </div>
 
       {/* Day headers */}
-      <div className="grid grid-cols-7 gap-0 mb-1">
+      <div className="grid grid-cols-7 gap-2 mb-2">
         {MINI_DAYS.map(d => (
-          <div key={d} className="text-center text-[10px] font-semibold opacity-40 py-1">{d}</div>
+          <div key={d} className="text-center text-[11px] font-semibold opacity-40">{d}</div>
         ))}
       </div>
 
-      {/* Weeks */}
-      {weeks.map((week, wi) => (
-        <div key={wi} className="grid grid-cols-7 gap-0">
-          {week.map((day, di) => {
-            if (!day) return <div key={di} className="h-9" />;
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const data = dailyPnl[dateStr];
-            const isToday = isCurrentMonth && day === today;
-            const hasTrades = !!data;
-            const isWin = hasTrades && data.pnl > 0;
-            const isLoss = hasTrades && data.pnl < 0;
+      {/* 2-week grid */}
+      <div className="flex flex-col gap-2">
+        {twoWeeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 gap-2">
+            {week.map((cell, di) => {
+              const data = dailyPnl[cell.dateStr];
+              const isTodayCell = isCurrentMonth && cell.day === today && cell.month === month;
+              const hasTrades = !!data;
+              const isWin = hasTrades && data.pnl > 0;
+              const isLoss = hasTrades && data.pnl < 0;
+              const dimmed = !cell.inMonth;
 
-            return (
-              <div
-                key={di}
-                className="h-9 flex flex-col items-center justify-center rounded-md relative"
-                style={{
-                  background: isWin ? 'var(--green-dim)' : isLoss ? 'var(--red-dim)' : 'transparent',
-                  border: isToday ? '2px solid var(--blue)' : '2px solid transparent',
-                }}
-              >
-                <span className="text-xs font-semibold" style={{
-                  color: isToday ? 'var(--blue)' : hasTrades ? 'var(--text)' : 'var(--text-dim)',
-                  opacity: hasTrades || isToday ? 1 : 0.4,
-                }}>{day}</span>
-                {hasTrades && (
-                  <span className="text-[8px] font-bold font-mono leading-none" style={{
-                    color: isWin ? 'var(--green)' : 'var(--red)',
-                  }}>
-                    {isWin ? '+' : ''}{formatPnl(data.pnl)}
+              return (
+                <div
+                  key={di}
+                  className="rounded-xl flex flex-col items-center justify-center"
+                  style={{
+                    aspectRatio: '1',
+                    background: isWin ? 'var(--green-dim)' : isLoss ? 'var(--red-dim)' : dimmed ? 'var(--surface)' : 'transparent',
+                    border: isTodayCell ? '2px solid var(--blue)' : '1px solid transparent',
+                    opacity: dimmed && !hasTrades ? 0.5 : 1,
+                  }}
+                >
+                  <span
+                    className="text-base font-bold leading-none"
+                    style={{
+                      color: isTodayCell ? 'var(--blue)' : hasTrades ? 'var(--text)' : 'var(--text-dim)',
+                      opacity: hasTrades || isTodayCell ? 1 : 0.4,
+                    }}
+                  >
+                    {cell.day}
                   </span>
-                )}
-                {hasTrades && (
-                  <div className="absolute bottom-0.5 flex gap-0.5">
-                    {data.entries.slice(0, 3).map((e, i) => (
-                      <div key={i} className="w-1 h-1 rounded-full" style={{
-                        background: e.result === 'W' ? 'var(--green)' : 'var(--red)',
-                      }} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+
+                  {isTodayCell && !hasTrades && (
+                    <span className="text-[10px] font-medium mt-0.5" style={{ color: 'var(--blue)', opacity: 0.7 }}>today</span>
+                  )}
+
+                  {hasTrades && (
+                    <span
+                      className="text-[11px] font-bold font-mono leading-none mt-1"
+                      style={{ color: isWin ? 'var(--green)' : 'var(--red)' }}
+                    >
+                      {shortPnl(data.pnl)}
+                    </span>
+                  )}
+
+                  {hasTrades && (
+                    <div className="flex gap-[3px] mt-1.5">
+                      {data.entries.slice(0, 3).map((e, j) => (
+                        <div
+                          key={j}
+                          className="rounded-full"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            background: e.result === 'W'
+                              ? (e.slot === 1 ? 'var(--green)' : e.slot === 2 ? 'var(--orange)' : 'var(--blue)')
+                              : 'var(--red)',
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
       {/* Legend */}
-      <div className="flex gap-3 mt-3 justify-center">
+      <div className="flex gap-4 mt-4 justify-center">
         {[
           { color: 'var(--green)', label: 'E1 win' },
           { color: 'var(--orange)', label: 'E2 BE' },
           { color: 'var(--red)', label: 'Loss' },
           { color: 'var(--blue)', label: 'E3 win' },
         ].map(({ color, label }) => (
-          <div key={label} className="flex items-center gap-1">
+          <div key={label} className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full" style={{ background: color }} />
-            <span className="text-[10px] opacity-50">{label}</span>
+            <span className="text-[11px] opacity-50 font-medium">{label}</span>
           </div>
         ))}
       </div>
