@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff } from 'lucide-react'
+import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut } from 'lucide-react'
 import { loadState, saveState, getDefaultState, createTrade, exportData, importData } from './lib/store'
-import { isSupabaseConfigured, pullState, pushState, pushTrade, pushConfig, deleteTrade as supaDeleteTrade } from './lib/supabase'
+import { isSupabaseConfigured, pullState, pushState, pushTrade, pushConfig, deleteTrade as supaDeleteTrade, getCurrentUser, onAuthChange, signOut } from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
 import TradeLog from './pages/TradeLog'
@@ -10,6 +10,7 @@ import Analytics from './pages/Analytics'
 import Accounts from './pages/Accounts'
 import TradeModal from './components/TradeModal'
 import TradeDetailView from './pages/TradeDetailView'
+import AuthGate from './components/AuthGate'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -35,17 +36,41 @@ export default function App() {
   const [prevPage, setPrevPage] = useState(null)
   const [sidebarHover, setSidebarHover] = useState(false)
   const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured() ? 'syncing' : 'offline') // 'synced' | 'syncing' | 'offline'
+  const [user, setUser] = useState(null)
+  const [authChecked, setAuthChecked] = useState(!isSupabaseConfigured())
   const isInitialSync = useRef(true)
 
   // Save to localStorage on every state change
   useEffect(() => { saveState(state) }, [state])
 
-  // Supabase: pull on mount, merge with local
+  // Auth: check current session + subscribe to changes
   useEffect(() => {
-    if (!isSupabaseConfigured()) return
+    if (!isSupabaseConfigured()) {
+      setAuthChecked(true)
+      return
+    }
+    getCurrentUser().then(u => {
+      setUser(u)
+      setAuthChecked(true)
+    })
+    const unsub = onAuthChange((u) => {
+      setUser(u)
+      if (!u) {
+        // Signed out — reset to empty defaults so next user doesn't see stale data
+        isInitialSync.current = true
+        setState(getDefaultState())
+      }
+    })
+    return unsub
+  }, [])
+
+  // Supabase: pull on mount (once user is known), merge with local
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !user) return
+    isInitialSync.current = true
     setSyncStatus('syncing')
-    pullState().then(remote => {
-      if (!remote) { setSyncStatus('offline'); return }
+    pullState(user.id).then(remote => {
+      if (!remote) { setSyncStatus('offline'); isInitialSync.current = false; return }
       setState(prev => {
         const defaults = getDefaultState()
         // Merge trades: remote wins for duplicates, keep unique locals
@@ -64,17 +89,17 @@ export default function App() {
       setSyncStatus('synced')
       isInitialSync.current = false
     })
-  }, [])
+  }, [user])
 
   // Supabase: push full state after initial sync merges
   useEffect(() => {
-    if (!isSupabaseConfigured() || isInitialSync.current) return
+    if (!isSupabaseConfigured() || !user || isInitialSync.current) return
     const timeout = setTimeout(() => {
       setSyncStatus('syncing')
-      pushState(state).then(() => setSyncStatus('synced')).catch(() => setSyncStatus('offline'))
+      pushState(state, user.id).then(() => setSyncStatus('synced')).catch(() => setSyncStatus('offline'))
     }, 1000) // debounce 1s
     return () => clearTimeout(timeout)
-  }, [state])
+  }, [state, user])
 
   // Theme
   useEffect(() => {
@@ -108,8 +133,8 @@ export default function App() {
 
   const deleteTradeHandler = useCallback((id) => {
     setState(s => ({ ...s, trades: s.trades.filter(t => t.id !== id) }))
-    supaDeleteTrade(id) // fire and forget
-  }, [])
+    if (user) supaDeleteTrade(id, user.id) // fire and forget
+  }, [user])
 
   const updateAccounts = useCallback((accounts) => {
     setState(s => ({ ...s, accounts }))
@@ -183,6 +208,18 @@ export default function App() {
   }
 
   const isLight = state.settings.theme === 'light'
+
+  // Auth gate: if Supabase is configured, require login
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+      </div>
+    )
+  }
+  if (isSupabaseConfigured() && !user) {
+    return <AuthGate />
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -258,6 +295,16 @@ export default function App() {
           <button onClick={handleImport} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Import">
             <Upload size={16} />
           </button>
+          {user && (
+            <button
+              onClick={() => { if (confirm('Sign out?')) signOut() }}
+              className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
+              style={{ color: 'var(--text-muted)', background: 'transparent' }}
+              title={`Sign out (${user.email})`}
+            >
+              <LogOut size={16} />
+            </button>
+          )}
           <button
             onClick={toggleTheme}
             className="w-9 h-9 rounded-[10px] flex items-center justify-center cursor-pointer transition-all duration-300 relative overflow-hidden"
