@@ -39,7 +39,14 @@ export function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return getDefaultState();
     const parsed = JSON.parse(raw);
-    return { ...getDefaultState(), ...parsed };
+    const defaults = getDefaultState();
+    return {
+      ...defaults,
+      ...parsed,
+      settings: { ...defaults.settings, ...(parsed.settings || {}) },
+      accounts: parsed.accounts || defaults.accounts,
+      trades: parsed.trades || defaults.trades,
+    };
   } catch {
     return getDefaultState();
   }
@@ -266,7 +273,9 @@ export function calcStats(trades, period = 'all') {
 
 // ── Risk Sink Score ──
 export function calcRiskScore(trades, accounts, settings) {
-  if (trades.length < 3) return { score: 0, grades: {}, label: 'Not enough data' };
+  const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
+  const a = accounts || [];
+  if (!trades || trades.length < 3) return { score: 0, grades: {}, label: 'Not enough data' };
 
   const stats = calcStats(trades, 'all');
 
@@ -276,18 +285,18 @@ export function calcRiskScore(trades, accounts, settings) {
   // 2. Entry Discipline (20%) — are you using all 3 entries consistently?
   const tradesWithEntries = trades.filter(t => t.entries.some(e => e.triggered));
   const avgEntriesPerTrade = tradesWithEntries.length > 0
-    ? tradesWithEntries.reduce((s, t) => s + t.entries.filter(e => e.triggered).length, 0) / tradesWithEntries.length
+    ? tradesWithEntries.reduce((sum, t) => sum + t.entries.filter(e => e.triggered).length, 0) / tradesWithEntries.length
     : 0;
   const disciplineScore = Math.min(100, (avgEntriesPerTrade / 3) * 100);
 
   // 3. MLL Management (20%) — how much buffer remains across accounts
-  const totalMllRemaining = accounts.reduce((s, acc) => {
+  const totalMllRemaining = a.reduce((sum, acc) => {
     const journalPnl = getAccountPnl(trades, acc.slot);
-    const totalPnl = acc.startingPnl + journalPnl;
+    const totalPnl = (acc.startingPnl || 0) + journalPnl;
     const mllUsed = Math.max(0, -totalPnl);
-    return s + (settings.mll - mllUsed);
+    return sum + (s.mll - mllUsed);
   }, 0);
-  const maxMll = accounts.length * settings.mll;
+  const maxMll = a.length * s.mll;
   const mllScore = maxMll > 0 ? (totalMllRemaining / maxMll) * 100 : 100;
 
   // 4. Consistency (20%) — low variance in daily PnL
@@ -347,12 +356,13 @@ export function getAccountPnl(trades, slot) {
 }
 
 export function getAccountStats(account, trades, settings) {
-  const journalPnl = getAccountPnl(trades, account.slot);
-  const totalPnl = account.startingPnl + journalPnl;
+  const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
+  const journalPnl = getAccountPnl(trades || [], account.slot);
+  const totalPnl = (account.startingPnl || 0) + journalPnl;
   const mllUsed = Math.max(0, -totalPnl);
-  const mllLeft = settings.mll - mllUsed;
+  const mllLeft = s.mll - mllUsed;
   const ptProgress = Math.max(0, totalPnl);
-  const ptLeft = settings.profitTarget - ptProgress;
+  const ptLeft = s.profitTarget - ptProgress;
 
   const entries = trades.flatMap(t => t.entries.filter(e => e.slot === account.slot && e.triggered && e.result));
   const wins = entries.filter(e => e.result === 'W');
@@ -363,10 +373,10 @@ export function getAccountStats(account, trades, settings) {
     totalPnl,
     mllUsed,
     mllLeft,
-    mllPercent: (mllLeft / settings.mll) * 100,
+    mllPercent: (mllLeft / s.mll) * 100,
     ptProgress,
     ptLeft,
-    ptPercent: (ptProgress / settings.profitTarget) * 100,
+    ptPercent: (ptProgress / s.profitTarget) * 100,
     slotWR,
     totalEntries: entries.length,
   };
