@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
-import { calcStats, formatCurrency } from '../lib/store'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from 'recharts'
+import { calcStats, calcRiskSinkLift, formatCurrency } from '../lib/store'
 
 const PERIODS = [
   { id: 'week', label: 'Week' },
@@ -53,6 +53,41 @@ function Row({ label, value, color, bar }) {
 export default function MobileAnalytics({ state }) {
   const [period, setPeriod] = useState('all')
   const stats = useMemo(() => calcStats(state.trades || [], period), [state.trades, period])
+  const lift = useMemo(() => {
+    // Apply same period filter as calcStats
+    let filtered = state.trades || []
+    const now = new Date()
+    if (period === 'week') {
+      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
+      filtered = filtered.filter((t) => new Date(t.date + 'T00:00:00') >= weekAgo)
+    } else if (period === 'month') {
+      filtered = filtered.filter((t) => {
+        const d = new Date(t.date + 'T00:00:00')
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+      })
+    }
+    return calcRiskSinkLift(filtered)
+  }, [state.trades, period])
+
+  // R-multiple histogram
+  const rBuckets = useMemo(() => {
+    const bins = [
+      { label: '≤−2', min: -Infinity, max: -1.5, count: 0, isLoss: true },
+      { label: '−1', min: -1.5, max: -0.5, count: 0, isLoss: true },
+      { label: '0', min: -0.5, max: 0.5, count: 0, isLoss: false },
+      { label: '+1', min: 0.5, max: 1.5, count: 0, isLoss: false },
+      { label: '+2', min: 1.5, max: 2.5, count: 0, isLoss: false },
+      { label: '+3', min: 2.5, max: 3.5, count: 0, isLoss: false },
+      { label: '+4', min: 3.5, max: 4.5, count: 0, isLoss: false },
+      { label: '+5', min: 4.5, max: 5.5, count: 0, isLoss: false },
+      { label: '≥+6', min: 5.5, max: Infinity, count: 0, isLoss: false },
+    ]
+    lift.perIdea.forEach((i) => {
+      const r = i.actualR
+      for (const b of bins) if (r > b.min && r <= b.max) { b.count++; break }
+    })
+    return bins
+  }, [lift])
 
   const equityData = stats.equityCurve.map((d) => ({
     date: d.date.slice(5),
@@ -150,6 +185,163 @@ export default function MobileAnalytics({ state }) {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* Risk Sync Lift — how much risk sink is actually helping */}
+      <div
+        className="rounded-2xl p-4 border mb-4"
+        style={{
+          background:
+            lift.liftR > 0
+              ? 'linear-gradient(135deg, color-mix(in srgb, var(--green) 15%, var(--card)), var(--card))'
+              : 'var(--card)',
+          borderColor: lift.liftR > 0 ? 'color-mix(in srgb, var(--green) 30%, var(--border))' : 'var(--border)',
+        }}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Risk Sync Lift
+            </div>
+            <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              vs single-account baseline
+            </div>
+          </div>
+          <div className="text-right">
+            <div
+              className="text-2xl font-bold font-mono"
+              style={{ color: lift.liftR >= 0 ? 'var(--green)' : 'var(--red)' }}
+            >
+              {lift.liftR >= 0 ? '+' : ''}
+              {lift.liftR.toFixed(1)}R
+            </div>
+            <div
+              className="text-[11px] font-mono"
+              style={{ color: lift.liftPnl >= 0 ? 'var(--green)' : 'var(--red)' }}
+            >
+              {formatCurrency(lift.liftPnl)}
+            </div>
+          </div>
+        </div>
+
+        {/* Comparison bars */}
+        {(() => {
+          const maxMag = Math.max(Math.abs(lift.actualR), Math.abs(lift.baselineR), 1)
+          const actualPct = (Math.abs(lift.actualR) / maxMag) * 100
+          const basePct = (Math.abs(lift.baselineR) / maxMag) * 100
+          return (
+            <div className="space-y-2 mt-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    With risk sync
+                  </span>
+                  <span
+                    className="text-[11px] font-bold font-mono"
+                    style={{ color: lift.actualR >= 0 ? 'var(--green)' : 'var(--red)' }}
+                  >
+                    {lift.actualR >= 0 ? '+' : ''}
+                    {lift.actualR.toFixed(1)}R
+                  </span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${actualPct}%`,
+                      background: lift.actualR >= 0 ? 'var(--green)' : 'var(--red)',
+                    }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    Single account (E1 only)
+                  </span>
+                  <span
+                    className="text-[11px] font-bold font-mono"
+                    style={{ color: lift.baselineR >= 0 ? 'var(--green)' : 'var(--red)' }}
+                  >
+                    {lift.baselineR >= 0 ? '+' : ''}
+                    {lift.baselineR.toFixed(1)}R
+                  </span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${basePct}%`,
+                      background: 'var(--text-dim)',
+                      opacity: 0.6,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {lift.rescues > 0 && (
+          <div
+            className="mt-3 pt-3 text-[11px] border-t"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-dim)' }}
+          >
+            <span style={{ color: 'var(--green)', fontWeight: 600 }}>
+              {lift.rescues}
+            </span>{' '}
+            {lift.rescues === 1 ? 'idea was' : 'ideas were'} rescued by a later entry after an E1 stop
+          </div>
+        )}
+      </div>
+
+      {/* R-Multiple Distribution */}
+      <div
+        className="rounded-2xl p-4 border mb-4"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+      >
+        <div className="text-[10px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
+          R-Multiple Distribution
+        </div>
+        {lift.perIdea.length === 0 ? (
+          <div className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>
+            No completed ideas yet
+          </div>
+        ) : (
+          <div style={{ width: '100%', height: 140 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={rBuckets} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: 'var(--text-muted)' }}
+                  axisLine={{ stroke: 'var(--border)' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: 'var(--text-muted)' }}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    fontSize: 11,
+                  }}
+                  cursor={{ fill: 'var(--border)', opacity: 0.3 }}
+                  formatter={(v) => [`${v} ${v === 1 ? 'idea' : 'ideas'}`, '']}
+                />
+                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  {rBuckets.map((b, i) => (
+                    <Cell key={i} fill={b.isLoss ? 'var(--red)' : 'var(--green)'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
       {/* Key stats grid */}

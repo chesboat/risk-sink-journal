@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts'
-import { TrendingUp, Zap, Target, Smile } from 'lucide-react'
-import { calcStats, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
+import { TrendingUp, Zap, Target, Smile, Shield } from 'lucide-react'
+import { calcStats, calcRiskSinkLift, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
 const COLORS = {
   green: '#30d158',
@@ -60,6 +60,9 @@ export default function Analytics({ state }) {
     })
     const rChartData = Object.entries(rBuckets).map(([r, count]) => ({ r, count }))
 
+    // Risk Sync Lift
+    const lift = calcRiskSinkLift(state.trades)
+
     // Daily PnL chart
     const dailyChartData = stats.equityCurve.map(d => ({
       date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -106,6 +109,64 @@ export default function Analytics({ state }) {
           </motion.div>
         </div>
 
+        {/* Risk Sync Lift */}
+        <motion.div
+          className="rounded-2xl p-6 border"
+          style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+          {...tabTransition}
+        >
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Shield size={16} style={{ color: COLORS.blue }} />
+                <h3 className="text-sm font-semibold text-white">Risk Sync Lift</h3>
+              </div>
+              <div className="text-xs text-white opacity-50">How much risk sync is adding vs E1-only</div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold" style={{ color: lift.liftR >= 0 ? COLORS.green : COLORS.red }}>
+                {lift.liftR >= 0 ? '+' : ''}{lift.liftR.toFixed(1)}R
+              </div>
+              <div className="text-xs font-mono" style={{ color: lift.liftPnl >= 0 ? COLORS.green : COLORS.red }}>
+                {fmt(lift.liftPnl)}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="rounded-xl p-4 border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+              <div className="text-xs text-white opacity-50 mb-1">With risk sync</div>
+              <div className="text-xl font-bold" style={{ color: lift.actualR >= 0 ? COLORS.green : COLORS.red }}>
+                {lift.actualR >= 0 ? '+' : ''}{lift.actualR.toFixed(1)}R
+              </div>
+              <div className="text-xs font-mono opacity-70" style={{ color: lift.actualPnl >= 0 ? COLORS.green : COLORS.red }}>
+                {fmt(lift.actualPnl)}
+              </div>
+            </div>
+            <div className="rounded-xl p-4 border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+              <div className="text-xs text-white opacity-50 mb-1">E1 only (baseline)</div>
+              <div className="text-xl font-bold" style={{ color: lift.baselineR >= 0 ? COLORS.green : COLORS.red }}>
+                {lift.baselineR >= 0 ? '+' : ''}{lift.baselineR.toFixed(1)}R
+              </div>
+              <div className="text-xs font-mono opacity-70" style={{ color: lift.basePnl >= 0 ? COLORS.green : COLORS.red }}>
+                {fmt(lift.basePnl)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-white opacity-60 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+            <div>
+              <span className="opacity-50">Rescues: </span>
+              <span className="font-semibold">{lift.rescues}</span>
+              <span className="opacity-50"> (E1 stopped → later entry won)</span>
+            </div>
+            <div>
+              <span className="opacity-50">Ideas counted: </span>
+              <span className="font-semibold">{lift.perIdea.length}</span>
+            </div>
+          </div>
+        </motion.div>
+
         {/* R Distribution */}
         <motion.div
           className="rounded-2xl p-6 border"
@@ -121,7 +182,13 @@ export default function Analytics({ state }) {
                 contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', color: 'var(--text)' }}
                 cursor={{ fill: 'rgba(10,132,255,0.1)' }}
               />
-              <Bar dataKey="count" fill={COLORS.blue} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                {rChartData.map((entry, i) => {
+                  const isLoss = entry.r.startsWith('-')
+                  const isZero = entry.r === '0'
+                  return <Cell key={i} fill={isLoss ? COLORS.red : isZero ? '#8e8e93' : COLORS.green} />
+                })}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </motion.div>

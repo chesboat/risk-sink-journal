@@ -360,6 +360,93 @@ export function calcRiskScore(trades, accounts, settings) {
   };
 }
 
+// ── Risk Sync Lift ──
+// How much R/$ has the sequential risk-sink structure actually earned you
+// compared to a hypothetical "single account, one shot" version of the same idea?
+//
+// Single-account baseline = you take the trade on E1 only, stop there.
+//   E1 W → +E1.r,  E1 L → -1R,  E1 BE → 0,  E1 skipped → 0 (idea never entered)
+//
+// Risk-sink actual = sum over triggered entries of their R/PNL contributions.
+//
+// Lift = actual - baseline. Positive means risk sink rescued or improved the idea.
+export function calcRiskSinkLift(trades) {
+  let actualR = 0
+  let baselineR = 0
+  let actualPnl = 0
+  let basePnl = 0
+  let rescues = 0       // ideas where E1 lost but a later entry caught a win
+  let missedWins = 0    // ideas where you'd have won at E1 alone — risk sink had no effect here
+  let perIdea = []
+
+  ;(trades || []).forEach((t) => {
+    const entries = t.entries || []
+    const e1 = entries.find((e) => e.slot === 1)
+
+    // Actual net from all triggered entries
+    const aR = entries.reduce((s, e) => {
+      if (!e.triggered) return s
+      if (e.result === 'W') return s + (e.r || 0)
+      if (e.result === 'L') return s - 1
+      return s
+    }, 0)
+    const aP = entries.reduce((s, e) => {
+      if (!e.triggered) return s
+      return s + (e.pnl || 0)
+    }, 0)
+
+    // Hypothetical E1-only outcome
+    let bR = 0
+    let bP = 0
+    if (e1 && e1.triggered) {
+      if (e1.result === 'W') {
+        bR = e1.r || 0
+        missedWins++
+      } else if (e1.result === 'L') {
+        bR = -1
+      }
+      bP = e1.pnl || 0
+    }
+
+    // Only count ideas that had *some* action (E1 triggered or any triggered)
+    const anyTriggered = entries.some((e) => e.triggered)
+    if (!anyTriggered) return
+
+    actualR += aR
+    baselineR += bR
+    actualPnl += aP
+    basePnl += bP
+
+    // Was this a rescue? E1 lost, later entry won
+    if (e1 && e1.triggered && e1.result === 'L') {
+      const laterWin = entries.some((e) => e.slot > 1 && e.triggered && e.result === 'W')
+      if (laterWin) rescues++
+    }
+
+    perIdea.push({
+      date: t.date,
+      actualR: aR,
+      baselineR: bR,
+      liftR: aR - bR,
+      actualPnl: aP,
+      basePnl: bP,
+      liftPnl: aP - bP,
+    })
+  })
+
+  return {
+    actualR,
+    baselineR,
+    liftR: actualR - baselineR,
+    actualPnl,
+    basePnl,
+    liftPnl: actualPnl - basePnl,
+    rescues,
+    missedWins,
+    perIdea,
+  }
+}
+
 // ── Account Helpers ──
 export function getAccountPnl(trades, slot) {
   return trades.reduce((sum, t) => {
