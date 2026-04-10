@@ -467,6 +467,31 @@ export default function TradeModal({ trade, onSave, onClose }) {
             {/* ── JOURNAL ── */}
             {activeSection === 'journal' && (
               <motion.div key="journal" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.15 }}>
+                {/* Trade context banner */}
+                {trade && (
+                  <div className="flex items-center gap-3 mb-4 px-3 py-2.5 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    <span className="text-xs font-bold font-mono" style={{ color: 'var(--text-dim)' }}>{form.date}</span>
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text)' }}>{form.instrument}</span>
+                    {form.setup && <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{form.setup}</span>}
+                    {form.session && <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{form.session}</span>}
+                    {(() => {
+                      const entries = form.entries || [];
+                      const triggered = entries.filter(e => e.triggered && e.result);
+                      const wins = triggered.filter(e => e.result === 'W').length;
+                      const losses = triggered.filter(e => e.result === 'L').length;
+                      if (triggered.length === 0) return null;
+                      return (
+                        <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-md" style={{
+                          background: wins > losses ? 'var(--green-dim)' : losses > wins ? 'var(--red-dim)' : 'var(--surface)',
+                          color: wins > losses ? 'var(--green)' : losses > wins ? 'var(--red)' : 'var(--text-dim)',
+                        }}>
+                          {wins > losses ? 'WIN' : losses > wins ? 'LOSS' : 'BE'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 {/* Thesis */}
                 <div className="mb-4">
                   <SectionLabel>Trade Thesis</SectionLabel>
@@ -475,8 +500,8 @@ export default function TradeModal({ trade, onSave, onClose }) {
                     onChange={e => update('thesis', e.target.value)}
                     placeholder="Why did you take this trade? What was your bias and reasoning?"
                     rows={3}
-                    className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-vertical"
+                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', minHeight: '72px' }}
                   />
                 </div>
 
@@ -487,9 +512,9 @@ export default function TradeModal({ trade, onSave, onClose }) {
                     value={form.notes || ''}
                     onChange={e => update('notes', e.target.value)}
                     placeholder="What happened during the trade? What went right or wrong? How did you manage it?"
-                    rows={4}
-                    className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+                    rows={5}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-vertical"
+                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', minHeight: '100px' }}
                   />
                 </div>
 
@@ -501,10 +526,19 @@ export default function TradeModal({ trade, onSave, onClose }) {
                     onChange={e => update('lesson', e.target.value)}
                     placeholder="What's the one takeaway from this trade?"
                     rows={2}
-                    className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-vertical"
+                    style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', minHeight: '48px' }}
                   />
                 </div>
+
+                {/* Journal quality hint */}
+                {trade && !form.thesis && !form.notes && !form.lesson && (
+                  <div className="text-center py-3 rounded-xl" style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}>
+                    <p className="text-xs font-medium" style={{ color: 'var(--text-dim)', opacity: 0.6 }}>
+                      Journaling improves your Risk Sink Score. Write your thesis before and review after each trade.
+                    </p>
+                  </div>
+                )}
               </motion.div>
             )}
 

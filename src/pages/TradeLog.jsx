@@ -4,10 +4,10 @@ import {
   Search,
   Filter,
   Trash2,
-  Edit3,
   AlertTriangle,
   ChevronDown,
   Image,
+  FileText,
 } from 'lucide-react';
 import {
   getIdeaResult,
@@ -545,12 +545,18 @@ export default function TradeLog({
                   animate={{ opacity: 1 }}
                   transition={{ delay: idx * 0.02 }}
                   className="group transition-colors"
-                  style={{ borderBottom: '1px solid var(--border)' }}
+                  style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                  onClick={() => openEditTrade(trade)}
                   onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface)'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                 >
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
-                    {formatDate(trade.date)}
+                    <div className="flex items-center gap-1.5">
+                      {formatDate(trade.date)}
+                      {(trade.thesis || trade.notes || trade.lesson) && (
+                        <FileText size={12} style={{ color: 'var(--accent)', opacity: 0.6, flexShrink: 0 }} title="Has journal entry" />
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text)' }}>
                     {trade.instrument}
@@ -598,15 +604,8 @@ export default function TradeLog({
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={() => openEditTrade(trade)}
-                        className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
-                        style={{ background: 'transparent', color: 'var(--accent)' }}
-                        title="Edit trade"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (
                             window.confirm(
                               'Are you sure you want to delete this trade? This cannot be undone.'
