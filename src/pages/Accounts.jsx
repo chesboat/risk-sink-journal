@@ -313,13 +313,18 @@ const AccountCard = ({ account, onUpdate, settings, trades }) => {
             </div>
           </div>
 
-          {/* MLL Remaining */}
+          {/* Trailing MLL */}
           <div className="mb-4">
             <ProgressBar
               percentage={stats.mllPercent || 0}
-              label={`$${(stats.mllLeft || 0).toFixed(0)} remaining`}
+              label={`$${(stats.mllLeft || 0).toFixed(0)} to bust`}
               color={(stats.mllPercent || 0) > 50 ? '#22c55e' : (stats.mllPercent || 0) > 25 ? '#f97316' : '#ef4444'}
             />
+            <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1.5 font-mono">
+              <span>Peak: ${Math.round(stats.mllPeak || 0).toLocaleString()}</span>
+              <span>Floor: ${Math.round(stats.mllFloor || 0).toLocaleString()}</span>
+              {stats.mllBusted && <span className="text-red-500 font-semibold">BUSTED</span>}
+            </div>
           </div>
 
           {/* Slot Win Rate */}

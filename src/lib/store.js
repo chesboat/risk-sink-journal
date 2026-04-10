@@ -302,12 +302,11 @@ export function calcRiskScore(trades, accounts, settings) {
     : 0;
   const disciplineScore = Math.min(100, (avgEntriesPerTrade / 3) * 100);
 
-  // 3. MLL Management (20%) — how much buffer remains across accounts
+  // 3. MLL Management (20%) — how much buffer remains across accounts (trailing-aware).
+  // Uses distance-to-bust from trailing MLL, capped per account at mll_initial.
   const totalMllRemaining = a.reduce((sum, acc) => {
-    const journalPnl = getAccountPnl(trades, acc.slot);
-    const totalPnl = (acc.startingPnl || 0) + journalPnl;
-    const mllUsed = Math.max(0, -totalPnl);
-    return sum + (s.mll - mllUsed);
+    const trailing = calcTrailingMll(acc, trades, s);
+    return sum + Math.max(0, Math.min(s.mll, trailing.distanceToBust));
   }, 0);
   const maxMll = a.length * s.mll;
   const mllScore = maxMll > 0 ? (totalMllRemaining / maxMll) * 100 : 100;
@@ -463,15 +462,10 @@ export function calcPooledHealth(trades, accounts, settings) {
   const pooledMll = perAccountMll * accts.length
   const pooledPt = perAccountPt * accts.length
 
-  // Per-account totals (starting PnL + triggered entries on that slot)
+  // Per-account totals using trailing MLL (peak-aware)
   const perAccount = accts.map((a) => {
-    const journalPnl = (trades || []).reduce((sum, t) => {
-      const e = (t.entries || []).find((x) => x.slot === a.slot && x.triggered)
-      return sum + (e ? e.pnl || 0 : 0)
-    }, 0)
-    const totalPnl = (a.startingPnl || 0) + journalPnl
-    const mllUsed = Math.max(0, -totalPnl)
-    const mllUsedPct = (mllUsed / perAccountMll) * 100
+    const trailing = calcTrailingMll(a, trades || [], s)
+    const totalPnl = trailing.currentPnl
     const ptProgress = Math.max(0, totalPnl)
     const ptPct = (ptProgress / perAccountPt) * 100
     return {
@@ -480,20 +474,31 @@ export function calcPooledHealth(trades, accounts, settings) {
       slot: a.slot,
       health: a.health,
       totalPnl,
-      mllUsed,
-      mllUsedPct,
+      peak: trailing.peak,
+      trailingFloor: trailing.trailingFloor,
+      mllDistance: trailing.distanceToBust,
+      mllUsed: trailing.mllUsed,
+      mllUsedPct: trailing.mllUsedPct,
+      busted: trailing.busted,
       ptProgress,
       ptPct,
     }
   })
 
-  // Combined PnL across accounts right now
+  // Combined PnL across accounts right now (for display)
   const combinedPnl = perAccount.reduce((s, a) => s + a.totalPnl, 0)
-  const combinedMllUsed = Math.max(0, -combinedPnl)
-  const combinedMllLeft = pooledMll + Math.min(0, combinedPnl)
-  // Headroom in dollars = perAccountStarting buffer + current combined PnL, floored at 0
-  const pooledHeadroom = Math.max(0, pooledMll + combinedPnl)
+
+  // Pooled headroom = sum of per-account distance-to-bust (cannot exceed per-account MLL,
+  // since that's the max any single account can have as runway at any moment).
+  // This is the honest answer to "how much total dollar drawdown can the system absorb
+  // before ANY account busts", assuming losses land on the weakest account.
+  const pooledHeadroom = perAccount.reduce(
+    (s, a) => s + Math.max(0, Math.min(perAccountMll, a.mllDistance)),
+    0
+  )
   const pooledHeadroomPct = (pooledHeadroom / pooledMll) * 100
+  const combinedMllUsed = pooledMll - pooledHeadroom
+  const combinedMllLeft = pooledHeadroom
 
   // Worst-account indicator: the account closest to its own MLL
   const worst = perAccount.reduce((w, a) => {
@@ -559,6 +564,61 @@ export function calcPooledHealth(trades, accounts, settings) {
   }
 }
 
+// ── Trailing MLL ──
+// Topstep / Tradeify / Lucid-style trailing drawdown:
+//   • Peak PnL is tracked chronologically (EOD-equivalent, i.e. after each trade)
+//   • Trailing floor = min(0, peak − MLL_initial) — trails $-for-$ with profit,
+//     locks at $0 once peak hits +MLL_initial
+//   • Account busts the moment current PnL drops below the floor
+// startingPnl is used as the peak seed (best estimate; pre-journal peaks unknown).
+export function calcTrailingMll(account, trades, settings) {
+  const s = settings || { mll: 2000 }
+  const mllInitial = s.mll || 2000
+  const seed = account.startingPnl || 0
+
+  // Build per-account chronological deltas from triggered entries on this slot
+  const sorted = [...(trades || [])].sort((a, b) => {
+    const da = new Date(a.date + 'T00:00:00').getTime()
+    const db = new Date(b.date + 'T00:00:00').getTime()
+    if (da !== db) return da - db
+    return (a.createdAt || 0) - (b.createdAt || 0)
+  })
+
+  let running = seed
+  let peak = seed
+  sorted.forEach((t) => {
+    const e = (t.entries || []).find((x) => x.slot === account.slot && x.triggered)
+    if (!e) return
+    running += e.pnl || 0
+    if (running > peak) peak = running
+  })
+
+  const currentPnl = running
+  const trailingFloor = Math.min(0, peak - mllInitial)
+  const distanceToBust = currentPnl - trailingFloor
+  const busted = distanceToBust <= 0
+  // mllUsed: how much of the $mllInitial buffer is consumed right now.
+  // When peak is below the initial MLL, this equals (mllInitial − distance).
+  // When peak has locked the floor at $0, mllUsed only grows as currentPnl drops below $0.
+  const mllUsed = Math.max(0, Math.min(mllInitial, mllInitial - distanceToBust))
+  const mllLeft = Math.max(0, mllInitial - mllUsed)
+  const mllPercent = (mllLeft / mllInitial) * 100
+  const mllUsedPct = (mllUsed / mllInitial) * 100
+
+  return {
+    peak,
+    currentPnl,
+    trailingFloor,
+    distanceToBust,
+    busted,
+    mllInitial,
+    mllUsed,
+    mllLeft,
+    mllPercent,
+    mllUsedPct,
+  }
+}
+
 // ── Account Helpers ──
 export function getAccountPnl(trades, slot) {
   return trades.reduce((sum, t) => {
@@ -571,8 +631,10 @@ export function getAccountStats(account, trades, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
   const journalPnl = getAccountPnl(trades || [], account.slot);
   const totalPnl = (account.startingPnl || 0) + journalPnl;
-  const mllUsed = Math.max(0, -totalPnl);
-  const mllLeft = s.mll - mllUsed;
+
+  // Trailing MLL: uses chronological peak tracking per account
+  const trailing = calcTrailingMll(account, trades || [], s);
+
   const ptProgress = Math.max(0, totalPnl);
   const ptLeft = s.profitTarget - ptProgress;
 
@@ -583,9 +645,15 @@ export function getAccountStats(account, trades, settings) {
   return {
     journalPnl,
     totalPnl,
-    mllUsed,
-    mllLeft,
-    mllPercent: (mllLeft / s.mll) * 100,
+    // MLL fields now come from trailing calculation
+    mllUsed: trailing.mllUsed,
+    mllLeft: trailing.mllLeft,
+    mllPercent: trailing.mllPercent,
+    // Extra trailing fields for richer UI
+    mllPeak: trailing.peak,
+    mllFloor: trailing.trailingFloor,
+    mllDistance: trailing.distanceToBust,
+    mllBusted: trailing.busted,
     ptProgress,
     ptLeft,
     ptPercent: (ptProgress / s.profitTarget) * 100,

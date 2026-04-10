@@ -142,11 +142,11 @@ function AccountCard({ account, trades, settings, onUpdate }) {
         </div>
       )}
 
-      {/* MLL Bar */}
+      {/* Trailing MLL Bar */}
       <div className="mb-2">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[10px] uppercase" style={{ color: 'var(--text-muted)' }}>
-            MLL Remaining
+            To bust
           </span>
           <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--text)' }}>
             {formatCurrency(stats.mllLeft)}
@@ -160,6 +160,11 @@ function AccountCard({ account, trades, settings, onUpdate }) {
               background: mllHealthy ? 'var(--green)' : mllWarn ? 'var(--orange)' : 'var(--red)',
             }}
           />
+        </div>
+        <div className="flex items-center justify-between text-[9px] font-mono mt-1" style={{ color: 'var(--text-muted)' }}>
+          <span>Peak {formatCurrency(stats.mllPeak || 0)}</span>
+          <span>Floor {formatCurrency(stats.mllFloor || 0)}</span>
+          {stats.mllBusted && <span style={{ color: 'var(--red)', fontWeight: 700 }}>BUSTED</span>}
         </div>
       </div>
 
