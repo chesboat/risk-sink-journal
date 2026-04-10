@@ -8,7 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, Target, Zap, DollarSign, Award } from 'lucide-react';
+import { TrendingUp, Target, Zap, DollarSign, Award, Info, X } from 'lucide-react';
 import {
   calcStats,
   calcRiskScore,
@@ -119,6 +119,8 @@ const StatCard = ({
 
 // Risk Sink Score Card
 const RiskScoreCard = ({ score, breakdown }) => {
+  const [showInfo, setShowInfo] = useState(false);
+
   const getScoreColor = (s) => {
     if (s > 65) return 'var(--green)';
     if (s < 35) return 'var(--red)';
@@ -138,15 +140,47 @@ const RiskScoreCard = ({ score, breakdown }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.1 }}
-      className="rounded-[14px] p-5 border"
+      className="rounded-[14px] p-5 border relative"
       style={{
         background: 'var(--card)',
         borderColor: 'var(--border)',
       }}
     >
-      <h3 className="text-sm font-semibold mb-6" style={{ color: 'var(--text)' }}>
-        Risk Sink Score
-      </h3>
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+          Risk Sink Score
+        </h3>
+        <button
+          onClick={() => setShowInfo(!showInfo)}
+          className="p-1 rounded-md transition-colors"
+          style={{ color: 'var(--text)', opacity: 0.4 }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
+          title="How Risk Sink Score works"
+        >
+          {showInfo ? <X size={14} /> : <Info size={14} />}
+        </button>
+      </div>
+
+      {showInfo && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          className="mb-5 rounded-lg p-3 text-xs leading-relaxed"
+          style={{ background: 'var(--surface)', color: 'var(--text)', opacity: 0.85 }}
+        >
+          <p className="font-semibold mb-2">How the score is calculated:</p>
+          <div className="space-y-1.5" style={{ opacity: 0.8 }}>
+            <p><span className="font-mono font-semibold">25%</span> — Idea Win Rate: % of trade ideas that are net profitable</p>
+            <p><span className="font-mono font-semibold">20%</span> — Entry Discipline: how well entries follow the plan (triggered vs. not)</p>
+            <p><span className="font-mono font-semibold">20%</span> — MLL Management: staying within max loss limits per account</p>
+            <p><span className="font-mono font-semibold">20%</span> — Consistency: even distribution of R across trades (low variance)</p>
+            <p><span className="font-mono font-semibold">15%</span> — Emotion Quality: absence of revenge trades, FOMO entries, and tilt</p>
+          </div>
+          <p className="mt-2" style={{ opacity: 0.6 }}>Score ranges: 85+ Excellent · 70+ Good · 50+ Fair · 35+ Poor · &lt;35 Critical</p>
+        </motion.div>
+      )}
 
       <div className="flex flex-col gap-5">
         {/* Score Circle */}
