@@ -325,6 +325,7 @@ const EquityCurveChart = ({ data }) => {
 const EntryPerformance = ({ entries }) => {
   const entryKeys = ['E1', 'E2', 'E3'];
   const colors = ['#10b981', '#f59e0b', '#06b6d4']; // green, orange, teal
+  const maxBarHeight = 180; // px
 
   return (
     <motion.div
@@ -337,37 +338,41 @@ const EntryPerformance = ({ entries }) => {
         borderColor: 'var(--border)',
       }}
     >
-      <h3 className="text-sm font-semibold mb-6" style={{ color: 'var(--text)' }}>
-        Entry Position Performance
+      <h3 className="text-xs font-semibold tracking-wide mb-6 opacity-60" style={{ color: 'var(--text)', textTransform: 'uppercase' }}>
+        Entry Win Rate
       </h3>
 
-      <div className="flex items-flex-end justify-around gap-6 h-64">
+      <div className="flex items-end justify-around gap-4" style={{ height: maxBarHeight + 60 }}>
         {entryKeys.map((key, idx) => {
           const entryData = entries[key] || { wins: 0, total: 0 };
           const winRate = entryData.total > 0
             ? (entryData.wins / entryData.total) * 100
             : 0;
+          const barHeight = entryData.total > 0
+            ? Math.max(8, (winRate / 100) * maxBarHeight)
+            : 0;
 
           return (
             <div key={key} className="flex-1 flex flex-col items-center">
-              <div className="text-sm font-mono font-bold mb-2 opacity-70">
+              <div
+                className="text-sm font-mono font-extrabold mb-2"
+                style={{ color: colors[idx] }}
+              >
                 {Math.round(winRate)}%
               </div>
-              <motion.div
-                initial={{ height: 0 }}
-                animate={{ height: '80%' }}
-                transition={{ duration: 1, ease: 'easeOut' }}
-                className="w-full rounded-t-lg"
-                style={{
-                  background: colors[idx],
-                  opacity: 0.8,
-                  height: `${Math.max(20, winRate * 2.4)}px`,
-                }}
-              />
-              <div className="text-xs font-medium mt-3 opacity-70">
+              <div className="w-full flex items-end" style={{ height: maxBarHeight }}>
+                <motion.div
+                  initial={{ height: 0 }}
+                  animate={{ height: barHeight }}
+                  transition={{ duration: 1, ease: 'easeOut' }}
+                  className="w-full rounded-lg"
+                  style={{ background: colors[idx], opacity: 0.75 }}
+                />
+              </div>
+              <div className="text-xs font-semibold mt-3" style={{ color: 'var(--text)', opacity: 0.7 }}>
                 {key}
               </div>
-              <div className="text-xs opacity-50">
+              <div className="text-[11px] font-mono" style={{ color: 'var(--text-dim)', opacity: 0.5 }}>
                 {entryData.wins}/{entryData.total}
               </div>
             </div>
