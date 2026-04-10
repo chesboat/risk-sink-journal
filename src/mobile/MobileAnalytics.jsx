@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from 'recharts'
-import { Info } from 'lucide-react'
-import { calcStats, calcRiskSinkLift, formatCurrency } from '../lib/store'
+import { Shield } from 'lucide-react'
+import { calcStats, calcPooledHealth, formatCurrency } from '../lib/store'
 
 const PERIODS = [
   { id: 'week', label: 'Week' },
@@ -53,25 +53,16 @@ function Row({ label, value, color, bar }) {
 
 export default function MobileAnalytics({ state }) {
   const [period, setPeriod] = useState('all')
-  const [showLiftInfo, setShowLiftInfo] = useState(false)
   const stats = useMemo(() => calcStats(state.trades || [], period), [state.trades, period])
-  const lift = useMemo(() => {
-    // Apply same period filter as calcStats
-    let filtered = state.trades || []
-    const now = new Date()
-    if (period === 'week') {
-      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
-      filtered = filtered.filter((t) => new Date(t.date + 'T00:00:00') >= weekAgo)
-    } else if (period === 'month') {
-      filtered = filtered.filter((t) => {
-        const d = new Date(t.date + 'T00:00:00')
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-      })
-    }
-    return calcRiskSinkLift(filtered)
-  }, [state.trades, period])
 
-  // R-multiple histogram
+  // Pooled Risk Sink Health — all-time snapshot of the combined account system.
+  // Not period-filtered: MLL/DD are about the system as a whole, not a window.
+  const pooled = useMemo(
+    () => calcPooledHealth(state.trades || [], state.accounts || [], state.settings),
+    [state.trades, state.accounts, state.settings]
+  )
+
+  // R-multiple histogram on the period-filtered trades
   const rBuckets = useMemo(() => {
     const bins = [
       { label: '≤−2', min: -Infinity, max: -1.5, count: 0, isLoss: true },
@@ -84,12 +75,33 @@ export default function MobileAnalytics({ state }) {
       { label: '+5', min: 4.5, max: 5.5, count: 0, isLoss: false },
       { label: '≥+6', min: 5.5, max: Infinity, count: 0, isLoss: false },
     ]
-    lift.perIdea.forEach((i) => {
-      const r = i.actualR
+    let filtered = state.trades || []
+    const now = new Date()
+    if (period === 'week') {
+      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
+      filtered = filtered.filter((t) => new Date(t.date + 'T00:00:00') >= weekAgo)
+    } else if (period === 'month') {
+      filtered = filtered.filter((t) => {
+        const d = new Date(t.date + 'T00:00:00')
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+      })
+    }
+    let hasAny = false
+    filtered.forEach((t) => {
+      const entries = t.entries || []
+      const anyTriggered = entries.some((e) => e.triggered)
+      if (!anyTriggered) return
+      hasAny = true
+      const r = entries.reduce((s, e) => {
+        if (!e.triggered) return s
+        if (e.result === 'W') return s + (e.r || 0)
+        if (e.result === 'L') return s - 1
+        return s
+      }, 0)
       for (const b of bins) if (r > b.min && r <= b.max) { b.count++; break }
     })
-    return bins
-  }, [lift])
+    return { bins, hasAny }
+  }, [state.trades, period])
 
   const equityData = stats.equityCurve.map((d) => ({
     date: d.date.slice(5),
@@ -189,143 +201,155 @@ export default function MobileAnalytics({ state }) {
         </div>
       </div>
 
-      {/* Risk Sync Lift — how much risk sink is actually helping */}
+      {/* Pooled Risk Sink Health — all accounts treated as one system */}
       <div
         className="rounded-2xl p-4 border mb-4"
         style={{
           background:
-            lift.liftR > 0
+            pooled.combinedPnl > 0
               ? 'linear-gradient(135deg, color-mix(in srgb, var(--green) 15%, var(--card)), var(--card))'
               : 'var(--card)',
-          borderColor: lift.liftR > 0 ? 'color-mix(in srgb, var(--green) 30%, var(--border))' : 'var(--border)',
+          borderColor: pooled.combinedPnl > 0 ? 'color-mix(in srgb, var(--green) 30%, var(--border))' : 'var(--border)',
         }}
       >
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <div>
             <div className="flex items-center gap-1.5">
+              <Shield size={12} style={{ color: 'var(--blue)' }} />
               <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                Risk Sync Lift
+                Pooled Health
               </div>
-              <button
-                onClick={() => setShowLiftInfo(v => !v)}
-                className="flex items-center"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <Info size={12} />
-              </button>
             </div>
             <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              vs single-account baseline
+              All {pooled.perAccount.length} accounts as one system
             </div>
           </div>
           <div className="text-right">
             <div
               className="text-2xl font-bold font-mono"
-              style={{ color: lift.liftR >= 0 ? 'var(--green)' : 'var(--red)' }}
+              style={{ color: pooled.combinedPnl >= 0 ? 'var(--green)' : 'var(--red)' }}
             >
-              {lift.liftR >= 0 ? '+' : ''}
-              {lift.liftR.toFixed(1)}R
+              {formatCurrency(pooled.combinedPnl)}
             </div>
-            <div
-              className="text-[11px] font-mono"
-              style={{ color: lift.liftPnl >= 0 ? 'var(--green)' : 'var(--red)' }}
-            >
-              {formatCurrency(lift.liftPnl)}
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              combined P&L
             </div>
           </div>
         </div>
 
-        {showLiftInfo && (
-          <div
-            className="rounded-xl p-3 mt-2 mb-1 text-[11px] leading-relaxed"
-            style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
-          >
-            <div className="font-semibold mb-1.5" style={{ color: 'var(--text)' }}>How this is calculated</div>
-            <div className="mb-1.5">
-              Each idea can fire up to 3 entries across accounts (E1=Lucid, E2=Tradeify, E3=Topstep). If an earlier entry stops, later entries can still catch the move.
+        {/* Pooled MLL headroom bar */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between text-[10px] mb-1.5">
+            <span style={{ color: 'var(--text-muted)' }}>Pooled MLL headroom</span>
+            <span className="font-mono" style={{ color: 'var(--text)' }}>
+              {formatCurrency(pooled.pooledHeadroom)}{' '}
+              <span style={{ color: 'var(--text-muted)' }}>
+                of ${pooled.pooledMll.toLocaleString()}
+              </span>
+            </span>
+          </div>
+          <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.max(0, Math.min(100, pooled.pooledHeadroomPct))}%`,
+                background:
+                  pooled.pooledHeadroomPct > 66
+                    ? 'var(--green)'
+                    : pooled.pooledHeadroomPct > 33
+                      ? 'var(--orange)'
+                      : 'var(--red)',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Per-account divergence strip */}
+        <div className="grid grid-cols-3 gap-1.5 mt-3">
+          {pooled.perAccount.map((a) => {
+            const isWorst = pooled.worst && pooled.worst.id === a.id && a.mllUsed > 0
+            return (
+              <div
+                key={a.id}
+                className="rounded-lg p-2 border"
+                style={{
+                  background: 'var(--surface)',
+                  borderColor: isWorst ? 'var(--orange)' : 'var(--border)',
+                }}
+              >
+                <div className="text-[9px] truncate" style={{ color: 'var(--text-muted)' }}>
+                  {a.name}
+                </div>
+                <div
+                  className="text-[13px] font-bold font-mono leading-tight"
+                  style={{ color: a.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' }}
+                >
+                  {formatCurrency(a.totalPnl)}
+                </div>
+                <div className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                  MLL {Math.round(a.mllUsedPct)}%
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Max Combined Drawdown */}
+      <div
+        className="rounded-2xl p-4 border mb-4"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Max Combined Drawdown
             </div>
-            <div className="mb-1">
-              <b>With risk sync:</b> R and P&L from all entries that triggered.
-            </div>
-            <div className="mb-1">
-              <b>E1 only:</b> what you'd have made taking just the first entry.
-            </div>
-            <div className="mb-1">
-              <b>Lift:</b> the delta — what risk sync is adding vs single-account.
-            </div>
-            <div>
-              <b>Rescues:</b> ideas where E1 stopped but a later entry won.
+            <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Deepest peak-to-trough the system ate
             </div>
           </div>
-        )}
-
-        {/* Comparison bars */}
-        {(() => {
-          const maxMag = Math.max(Math.abs(lift.actualR), Math.abs(lift.baselineR), 1)
-          const actualPct = (Math.abs(lift.actualR) / maxMag) * 100
-          const basePct = (Math.abs(lift.baselineR) / maxMag) * 100
-          return (
-            <div className="space-y-2 mt-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                    With risk sync
-                  </span>
-                  <span
-                    className="text-[11px] font-bold font-mono"
-                    style={{ color: lift.actualR >= 0 ? 'var(--green)' : 'var(--red)' }}
-                  >
-                    {lift.actualR >= 0 ? '+' : ''}
-                    {lift.actualR.toFixed(1)}R
-                  </span>
-                </div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${actualPct}%`,
-                      background: lift.actualR >= 0 ? 'var(--green)' : 'var(--red)',
-                    }}
-                  />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                    Single account (E1 only)
-                  </span>
-                  <span
-                    className="text-[11px] font-bold font-mono"
-                    style={{ color: lift.baselineR >= 0 ? 'var(--green)' : 'var(--red)' }}
-                  >
-                    {lift.baselineR >= 0 ? '+' : ''}
-                    {lift.baselineR.toFixed(1)}R
-                  </span>
-                </div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${basePct}%`,
-                      background: 'var(--text-dim)',
-                      opacity: 0.6,
-                    }}
-                  />
-                </div>
-              </div>
+          <div className="text-right">
+            <div
+              className="text-xl font-bold font-mono"
+              style={{
+                color:
+                  pooled.maxDdPctOfPool < 33
+                    ? 'var(--green)'
+                    : pooled.maxDdPctOfPool < 66
+                      ? 'var(--orange)'
+                      : 'var(--red)',
+              }}
+            >
+              -${Math.round(pooled.maxDd).toLocaleString()}
             </div>
-          )
-        })()}
-
-        {lift.rescues > 0 && (
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              {Math.round(pooled.maxDdPctOfPool)}% of pool
+            </div>
+          </div>
+        </div>
+        <div className="h-2 rounded-full overflow-hidden mb-1" style={{ background: 'var(--surface)' }}>
           <div
-            className="mt-3 pt-3 text-[11px] border-t"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-dim)' }}
-          >
-            <span style={{ color: 'var(--green)', fontWeight: 600 }}>
-              {lift.rescues}
-            </span>{' '}
-            {lift.rescues === 1 ? 'idea was' : 'ideas were'} rescued by a later entry after an E1 stop
+            className="h-full rounded-full transition-all"
+            style={{
+              width: `${Math.max(0, Math.min(100, pooled.maxDdPctOfPool))}%`,
+              background:
+                pooled.maxDdPctOfPool < 33
+                  ? 'var(--green)'
+                  : pooled.maxDdPctOfPool < 66
+                    ? 'var(--orange)'
+                    : 'var(--red)',
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-between text-[9px]" style={{ color: 'var(--text-muted)' }}>
+          <span>Safe</span>
+          <span>Danger</span>
+          <span>Blown</span>
+        </div>
+        {pooled.maxDdAt && (
+          <div className="text-[10px] mt-2 pt-2 border-t" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
+            Trough on <span className="font-mono">{pooled.maxDdAt}</span>
           </div>
         )}
       </div>
@@ -338,14 +362,14 @@ export default function MobileAnalytics({ state }) {
         <div className="text-[10px] uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
           R-Multiple Distribution
         </div>
-        {lift.perIdea.length === 0 ? (
+        {!rBuckets.hasAny ? (
           <div className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>
             No completed ideas yet
           </div>
         ) : (
           <div style={{ width: '100%', height: 140 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={rBuckets} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+              <BarChart data={rBuckets.bins} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 9, fill: 'var(--text-muted)' }}
@@ -369,7 +393,7 @@ export default function MobileAnalytics({ state }) {
                   formatter={(v) => [`${v} ${v === 1 ? 'idea' : 'ideas'}`, '']}
                 />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                  {rBuckets.map((b, i) => (
+                  {rBuckets.bins.map((b, i) => (
                     <Cell key={i} fill={b.isLoss ? 'var(--red)' : 'var(--green)'} />
                   ))}
                 </Bar>

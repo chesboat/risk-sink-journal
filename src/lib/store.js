@@ -447,6 +447,118 @@ export function calcRiskSinkLift(trades) {
   }
 }
 
+// ── Pooled Risk Sink Health ──
+// Treats the 3 prop accounts as a single system. Risk sink's real value is pooled
+// MLL headroom: you get 3× per-account MLL ($6k default) to keep taking shots
+// without any single account busting. Accounts are allowed to diverge — one can
+// be deep red while two are green and the system is still healthy.
+//
+// Max drawdown is computed peak-to-trough on the COMBINED equity curve
+// (all accounts summed, chronological by trade date then createdAt).
+export function calcPooledHealth(trades, accounts, settings) {
+  const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 }
+  const accts = accounts || []
+  const perAccountMll = s.mll || 2000
+  const perAccountPt = s.profitTarget || 3000
+  const pooledMll = perAccountMll * accts.length
+  const pooledPt = perAccountPt * accts.length
+
+  // Per-account totals (starting PnL + triggered entries on that slot)
+  const perAccount = accts.map((a) => {
+    const journalPnl = (trades || []).reduce((sum, t) => {
+      const e = (t.entries || []).find((x) => x.slot === a.slot && x.triggered)
+      return sum + (e ? e.pnl || 0 : 0)
+    }, 0)
+    const totalPnl = (a.startingPnl || 0) + journalPnl
+    const mllUsed = Math.max(0, -totalPnl)
+    const mllUsedPct = (mllUsed / perAccountMll) * 100
+    const ptProgress = Math.max(0, totalPnl)
+    const ptPct = (ptProgress / perAccountPt) * 100
+    return {
+      id: a.id,
+      name: a.name,
+      slot: a.slot,
+      health: a.health,
+      totalPnl,
+      mllUsed,
+      mllUsedPct,
+      ptProgress,
+      ptPct,
+    }
+  })
+
+  // Combined PnL across accounts right now
+  const combinedPnl = perAccount.reduce((s, a) => s + a.totalPnl, 0)
+  const combinedMllUsed = Math.max(0, -combinedPnl)
+  const combinedMllLeft = pooledMll + Math.min(0, combinedPnl)
+  // Headroom in dollars = perAccountStarting buffer + current combined PnL, floored at 0
+  const pooledHeadroom = Math.max(0, pooledMll + combinedPnl)
+  const pooledHeadroomPct = (pooledHeadroom / pooledMll) * 100
+
+  // Worst-account indicator: the account closest to its own MLL
+  const worst = perAccount.reduce((w, a) => {
+    if (!w) return a
+    return a.mllUsedPct > w.mllUsedPct ? a : w
+  }, null)
+
+  // Best-account indicator: the account closest to payout
+  const best = perAccount.reduce((b, a) => {
+    if (!b) return a
+    return a.ptPct > b.ptPct ? a : b
+  }, null)
+
+  // Combined equity curve + max drawdown
+  // Sort trades chronologically and accumulate combined PnL across all triggered entries.
+  const sorted = [...(trades || [])].sort((a, b) => {
+    const da = new Date(a.date + 'T00:00:00').getTime()
+    const db = new Date(b.date + 'T00:00:00').getTime()
+    if (da !== db) return da - db
+    return (a.createdAt || 0) - (b.createdAt || 0)
+  })
+  const startingCombined = accts.reduce((s, a) => s + (a.startingPnl || 0), 0)
+  let running = startingCombined
+  const curve = [{ date: null, combined: running }]
+  sorted.forEach((t) => {
+    const dayDelta = (t.entries || []).reduce((s, e) => {
+      if (!e.triggered) return s
+      return s + (e.pnl || 0)
+    }, 0)
+    running += dayDelta
+    curve.push({ date: t.date, combined: running })
+  })
+
+  // Peak-to-trough drawdown (in dollars) across the combined curve
+  let peak = startingCombined
+  let maxDd = 0
+  let maxDdAt = null
+  curve.forEach((pt) => {
+    if (pt.combined > peak) peak = pt.combined
+    const dd = peak - pt.combined
+    if (dd > maxDd) {
+      maxDd = dd
+      maxDdAt = pt.date
+    }
+  })
+  const maxDdPctOfPool = (maxDd / pooledMll) * 100
+
+  return {
+    pooledMll,
+    pooledPt,
+    combinedPnl,
+    combinedMllUsed,
+    combinedMllLeft,
+    pooledHeadroom,
+    pooledHeadroomPct,
+    perAccount,
+    worst,
+    best,
+    curve,
+    maxDd,
+    maxDdAt,
+    maxDdPctOfPool,
+  }
+}
+
 // ── Account Helpers ──
 export function getAccountPnl(trades, slot) {
   return trades.reduce((sum, t) => {
