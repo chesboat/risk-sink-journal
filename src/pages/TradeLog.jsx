@@ -34,7 +34,7 @@ export default function TradeLog({
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [selectedSetups, setSelectedSetups] = useState([]);
-  const [selectedResult, setSelectedResult] = useState('all'); // 'all', 'WIN', 'LOSS'
+  const [selectedResult, setSelectedResult] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sortColumn, setSortColumn] = useState('date');
@@ -53,7 +53,6 @@ export default function TradeLog({
   const filteredAndSortedTrades = useMemo(() => {
     let filtered = [...trades];
 
-    // Search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -66,35 +65,30 @@ export default function TradeLog({
       );
     }
 
-    // Instrument filter
     if (selectedInstruments.length > 0) {
       filtered = filtered.filter((trade) =>
         selectedInstruments.includes(trade.instrument)
       );
     }
 
-    // Session filter
     if (selectedSessions.length > 0) {
       filtered = filtered.filter((trade) =>
         selectedSessions.includes(trade.session)
       );
     }
 
-    // Setup filter
     if (selectedSetups.length > 0) {
       filtered = filtered.filter((trade) =>
         selectedSetups.includes(trade.setup)
       );
     }
 
-    // Result filter
     if (selectedResult !== 'all') {
       filtered = filtered.filter(
         (trade) => getIdeaResult(trade) === selectedResult
       );
     }
 
-    // Date range filter
     if (startDate) {
       const start = new Date(startDate);
       filtered = filtered.filter((trade) => new Date(trade.date) >= start);
@@ -105,7 +99,6 @@ export default function TradeLog({
       filtered = filtered.filter((trade) => new Date(trade.date) <= end);
     }
 
-    // Sort
     filtered.sort((a, b) => {
       let aVal, bVal;
 
@@ -143,25 +136,18 @@ export default function TradeLog({
           bVal = 0;
       }
 
-      // Handle string comparison
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortDirection === 'asc'
           ? aVal.localeCompare(bVal)
           : bVal.localeCompare(aVal);
       }
 
-      // Handle numeric comparison
-      if (sortDirection === 'asc') {
-        return aVal - bVal;
-      } else {
-        return bVal - aVal;
-      }
+      return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
 
     return filtered;
   }, [trades, searchQuery, selectedInstruments, selectedSessions, selectedSetups, selectedResult, startDate, endDate, sortColumn, sortDirection]);
 
-  // Toggle sort
   const handleSort = (column) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -171,7 +157,6 @@ export default function TradeLog({
     }
   };
 
-  // Toggle filter chips
   const toggleInstrument = (instrument) => {
     setSelectedInstruments((prev) =>
       prev.includes(instrument)
@@ -201,9 +186,9 @@ export default function TradeLog({
     if (!entries || entries.length === 0) {
       return (
         <div className="flex gap-1">
-          <div className="w-2 h-2 rounded-full bg-gray-300" />
-          <div className="w-2 h-2 rounded-full bg-gray-300" />
-          <div className="w-2 h-2 rounded-full bg-gray-300" />
+          <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-muted)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-muted)' }} />
+          <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-muted)' }} />
         </div>
       );
     }
@@ -211,17 +196,22 @@ export default function TradeLog({
     return (
       <div className="flex gap-1">
         {entries.slice(0, 3).map((entry, idx) => {
-          let bgColor = 'bg-gray-300';
-          if (entry.triggered === false) bgColor = 'bg-transparent border border-gray-300';
-          if (entry.triggered === true) {
-            bgColor = entry.result === 'W' ? 'bg-green-500' : 'bg-red-500';
+          let bg = 'var(--text-muted)';
+          let border = 'none';
+          if (entry.triggered === false) {
+            bg = 'transparent';
+            border = '1px solid var(--text-muted)';
           }
-          if (entry.result === 'BE') bgColor = 'bg-gray-400';
+          if (entry.triggered === true) {
+            bg = entry.result === 'W' ? 'var(--green)' : 'var(--red)';
+          }
+          if (entry.result === 'BE') bg = 'var(--text-muted)';
 
           return (
             <div
               key={idx}
-              className={`w-2 h-2 rounded-full ${bgColor}`}
+              className="w-2 h-2 rounded-full"
+              style={{ background: bg, border }}
             />
           );
         })}
@@ -232,11 +222,14 @@ export default function TradeLog({
   // Result tag rendering
   const renderResultTag = (trade) => {
     const result = getIdeaResult(trade);
-    const bgColor = result === 'WIN' ? 'bg-green-100' : 'bg-red-100';
-    const textColor = result === 'WIN' ? 'text-green-700' : 'text-red-700';
-
     return (
-      <span className={`${bgColor} ${textColor} rounded-md px-2 py-0.5 text-xs font-medium`}>
+      <span
+        className="rounded-md px-2 py-0.5 text-xs font-medium"
+        style={{
+          background: result === 'WIN' ? 'var(--green-dim)' : 'var(--red-dim)',
+          color: result === 'WIN' ? 'var(--green)' : 'var(--red)',
+        }}
+      >
         {result}
       </span>
     );
@@ -245,22 +238,32 @@ export default function TradeLog({
   // Net R rendering
   const renderNetR = (trade) => {
     const netR = getNetR(trade);
-    const textColor = netR >= 0 ? 'text-green-600' : 'text-red-600';
-    return <span className={`${textColor} font-medium`}>{netR.toFixed(2)}R</span>;
+    return (
+      <span className="font-medium" style={{ color: netR >= 0 ? 'var(--green)' : 'var(--red)' }}>
+        {netR.toFixed(2)}R
+      </span>
+    );
   };
 
   // Net P&L rendering
   const renderNetPnl = (trade) => {
     const pnl = getNetPnl(trade);
     return (
-      <span className={`font-medium ${pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+      <span className="font-medium" style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
         {formatPnl(pnl)}
       </span>
     );
   };
 
+  // Filter chip helper
+  const chipStyle = (active) => ({
+    background: active ? 'var(--accent)' : 'var(--surface)',
+    color: active ? '#fff' : 'var(--text-dim)',
+    border: active ? 'none' : '1px solid var(--border)',
+  });
+
   return (
-    <div className="h-full flex flex-col bg-white overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden" style={{ background: 'var(--bg)' }}>
       {/* Behavioral Flags Banner */}
       <AnimatePresence>
         {behavioralFlags.length > 0 && (
@@ -269,17 +272,18 @@ export default function TradeLog({
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
-            className="bg-yellow-50 border-b border-yellow-200 px-4 py-3"
+            className="px-4 py-3"
+            style={{ background: 'rgba(255, 159, 10, 0.1)', borderBottom: '1px solid rgba(255, 159, 10, 0.2)' }}
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <AlertTriangle className="w-4 h-4 text-yellow-600" />
-                  <h3 className="font-semibold text-yellow-900 text-sm">Behavioral Alerts</h3>
+                  <AlertTriangle className="w-4 h-4" style={{ color: 'var(--orange)' }} />
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--orange)' }}>Behavioral Alerts</h3>
                 </div>
                 <div className="space-y-1">
                   {behavioralFlags.map((flag, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm text-yellow-800">
+                    <div key={idx} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-dim)' }}>
                       <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                       <span>{flag.message}</span>
                     </div>
@@ -288,7 +292,8 @@ export default function TradeLog({
               </div>
               <button
                 onClick={() => setDismissedFlags(true)}
-                className="text-yellow-600 hover:text-yellow-700 text-sm font-medium flex-shrink-0"
+                className="text-sm font-medium flex-shrink-0 border-0 cursor-pointer"
+                style={{ color: 'var(--orange)', background: 'transparent' }}
               >
                 Dismiss
               </button>
@@ -298,29 +303,37 @@ export default function TradeLog({
       </AnimatePresence>
 
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">Trade Log</h1>
+      <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--text)' }}>Trade Log</h1>
         <div className="flex gap-3">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
               type="text"
               placeholder="Search by instrument, setup, session, thesis, lesson..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2 rounded-lg text-sm focus:outline-none"
+              style={{
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                border: '1px solid var(--border)',
+              }}
             />
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+            style={{
+              background: 'var(--surface)',
+              color: 'var(--text-dim)',
+              border: '1px solid var(--border)',
+            }}
           >
             <Filter className="w-4 h-4" />
             Filters
             <ChevronDown
-              className={`w-4 h-4 transition-transform ${
-                showFilters ? 'rotate-180' : ''
-              }`}
+              className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`}
             />
           </button>
         </div>
@@ -334,11 +347,12 @@ export default function TradeLog({
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
-            className="border-b border-gray-200 bg-gray-50 px-6 py-4 space-y-4 overflow-y-auto"
+            className="px-6 py-4 space-y-4 overflow-y-auto"
+            style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}
           >
             {/* Instrument Filter */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-2">
+              <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                 Instrument
               </label>
               <div className="flex flex-wrap gap-2">
@@ -346,11 +360,8 @@ export default function TradeLog({
                   <button
                     key={instr}
                     onClick={() => toggleInstrument(instr)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      selectedInstruments.includes(instr)
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
-                    }`}
+                    className="px-3 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                    style={chipStyle(selectedInstruments.includes(instr))}
                   >
                     {instr}
                   </button>
@@ -360,7 +371,7 @@ export default function TradeLog({
 
             {/* Session Filter */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-2">
+              <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                 Session
               </label>
               <div className="flex flex-wrap gap-2">
@@ -368,11 +379,8 @@ export default function TradeLog({
                   <button
                     key={sess}
                     onClick={() => toggleSession(sess)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      selectedSessions.includes(sess)
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
-                    }`}
+                    className="px-3 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                    style={chipStyle(selectedSessions.includes(sess))}
                   >
                     {sess}
                   </button>
@@ -382,7 +390,7 @@ export default function TradeLog({
 
             {/* Setup Filter */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-2">
+              <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                 Setup
               </label>
               <div className="flex flex-wrap gap-2">
@@ -390,11 +398,8 @@ export default function TradeLog({
                   <button
                     key={setup}
                     onClick={() => toggleSetup(setup)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      selectedSetups.includes(setup)
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
-                    }`}
+                    className="px-3 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                    style={chipStyle(selectedSetups.includes(setup))}
                   >
                     {setup}
                   </button>
@@ -404,7 +409,7 @@ export default function TradeLog({
 
             {/* Result Filter */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-2">
+              <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                 Result
               </label>
               <div className="flex gap-2">
@@ -412,11 +417,8 @@ export default function TradeLog({
                   <button
                     key={res}
                     onClick={() => setSelectedResult(res)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                      selectedResult === res
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
-                    }`}
+                    className="px-3 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer"
+                    style={chipStyle(selectedResult === res)}
                   >
                     {res}
                   </button>
@@ -427,25 +429,35 @@ export default function TradeLog({
             {/* Date Range Filter */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-2">
+                <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                   Start Date
                 </label>
                 <input
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                  style={{
+                    background: 'var(--card)',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                  }}
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-2">
+                <label className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>
                   End Date
                 </label>
                 <input
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                  style={{
+                    background: 'var(--card)',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                  }}
                 />
               </div>
             </div>
@@ -466,7 +478,8 @@ export default function TradeLog({
                   setStartDate('');
                   setEndDate('');
                 }}
-                className="w-full px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                className="w-full px-3 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors border-0"
+                style={{ color: 'var(--accent)', background: 'rgba(10, 132, 255, 0.1)' }}
               >
                 Clear All Filters
               </button>
@@ -479,119 +492,50 @@ export default function TradeLog({
       <div className="flex-1 overflow-auto">
         {filteredAndSortedTrades.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-6 py-12 text-center">
-            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-              <Image className="w-8 h-8 text-gray-400" />
+            <div
+              className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+              style={{ background: 'var(--surface)' }}
+            >
+              <Image className="w-8 h-8" style={{ color: 'var(--text-muted)' }} />
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No trades yet</h3>
-            <p className="text-gray-600 text-sm max-w-sm">
+            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text)' }}>No trades yet</h3>
+            <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
               Start documenting your trades to build your journal. Each trade logged helps
               you track patterns and improve your decision-making.
             </p>
           </div>
         ) : (
           <table className="w-full border-collapse">
-            <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
+            <thead className="sticky top-0" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
               <tr>
-                <th
-                  onClick={() => handleSort('date')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Date
-                    {sortColumn === 'date' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleSort('instrument')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Instrument
-                    {sortColumn === 'instrument' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleSort('session')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Session
-                    {sortColumn === 'session' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleSort('setup')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Setup
-                    {sortColumn === 'setup' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700">
-                  Entries
-                </th>
-                <th
-                  onClick={() => handleSort('result')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Result
-                    {sortColumn === 'result' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleSort('netR')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Net R
-                    {sortColumn === 'netR' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleSort('netPnl')}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    Net P&L
-                    {sortColumn === 'netPnl' && (
-                      <span className="text-blue-600">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700">
-                  Screenshot
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700">
-                  Actions
-                </th>
+                {[
+                  { key: 'date', label: 'Date' },
+                  { key: 'instrument', label: 'Instrument' },
+                  { key: 'session', label: 'Session' },
+                  { key: 'setup', label: 'Setup' },
+                  { key: null, label: 'Entries' },
+                  { key: 'result', label: 'Result' },
+                  { key: 'netR', label: 'Net R' },
+                  { key: 'netPnl', label: 'Net P&L' },
+                  { key: null, label: 'Screenshot', align: 'center' },
+                  { key: null, label: 'Actions', align: 'right' },
+                ].map((col, i) => (
+                  <th
+                    key={i}
+                    onClick={col.key ? () => handleSort(col.key) : undefined}
+                    className={`px-4 py-3 text-${col.align || 'left'} text-xs font-semibold ${col.key ? 'cursor-pointer' : ''} transition-colors`}
+                    style={{ color: 'var(--text-dim)' }}
+                  >
+                    <div className={`flex items-center gap-2 ${col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : ''}`}>
+                      {col.label}
+                      {col.key && sortColumn === col.key && (
+                        <span style={{ color: 'var(--accent)' }}>
+                          {sortDirection === 'asc' ? '↑' : '↓'}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -601,18 +545,21 @@ export default function TradeLog({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: idx * 0.02 }}
-                  className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
+                  className="group transition-colors"
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                 >
-                  <td className="px-4 py-3 text-sm text-gray-900">
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
                     {formatDate(trade.date)}
                   </td>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                  <td className="px-4 py-3 text-sm font-medium" style={{ color: 'var(--text)' }}>
                     {trade.instrument}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-dim)' }}>
                     {trade.session}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
+                  <td className="px-4 py-3 text-sm" style={{ color: 'var(--text-dim)' }}>
                     {trade.setup}
                   </td>
                   <td className="px-4 py-3">
@@ -631,10 +578,10 @@ export default function TradeLog({
                     {trade.screenshot && (
                       <button
                         onClick={() => setLightboxImage(trade.screenshot)}
-                        className="inline-flex items-center justify-center p-2 hover:bg-gray-200 rounded-lg transition-colors"
-                        title="View screenshot"
+                        className="inline-flex items-center justify-center p-2 rounded-lg transition-colors border-0 cursor-pointer"
+                        style={{ background: 'transparent', color: 'var(--text-muted)' }}
                       >
-                        <Image className="w-4 h-4 text-gray-600" />
+                        <Image className="w-4 h-4" />
                       </button>
                     )}
                   </td>
@@ -642,10 +589,11 @@ export default function TradeLog({
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => openEditTrade(trade)}
-                        className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                        className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
+                        style={{ background: 'transparent', color: 'var(--accent)' }}
                         title="Edit trade"
                       >
-                        <Edit3 className="w-4 h-4 text-blue-600" />
+                        <Edit3 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => {
@@ -657,10 +605,11 @@ export default function TradeLog({
                             deleteTrade(trade.id);
                           }
                         }}
-                        className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                        className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
+                        style={{ background: 'transparent', color: 'var(--red)' }}
                         title="Delete trade"
                       >
-                        <Trash2 className="w-4 h-4 text-red-600" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>
@@ -679,21 +628,24 @@ export default function TradeLog({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setLightboxImage(null)}
-            className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 flex items-center justify-center z-50 p-4"
+            style={{ background: 'rgba(0,0,0,0.75)' }}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="relative max-w-4xl max-h-[90vh] bg-white rounded-lg overflow-hidden"
+              className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
+              style={{ background: 'var(--card)' }}
             >
               <button
                 onClick={() => setLightboxImage(null)}
-                className="absolute top-4 right-4 p-2 bg-white rounded-full hover:bg-gray-100 transition-colors z-10"
+                className="absolute top-4 right-4 p-2 rounded-full transition-colors z-10 border-0 cursor-pointer"
+                style={{ background: 'var(--surface)', color: 'var(--text)' }}
               >
                 <svg
-                  className="w-6 h-6 text-gray-800"
+                  className="w-6 h-6"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
