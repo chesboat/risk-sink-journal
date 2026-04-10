@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   AreaChart,
@@ -8,7 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, Target, Zap, DollarSign, Award, Info, X } from 'lucide-react';
+import { TrendingUp, Target, Zap, DollarSign, Award, Info, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   calcStats,
   calcRiskScore,
@@ -67,12 +67,16 @@ const StatCard = ({
   icon: Icon,
   label,
   value,
+  prefix = '',
   suffix = '',
+  subtitle = null,
+  subtitleColor = null,
   change = null,
   isAnimated = true,
   gradient = false,
   gradientClass = '',
   isHighlight = false,
+  valueColor = null,
 }) => {
   const displayValue = isAnimated ? value : Math.round(value * 100) / 100;
 
@@ -88,25 +92,29 @@ const StatCard = ({
       }}
     >
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium opacity-70">
+        <span className="text-xs font-semibold tracking-wide opacity-60" style={{ letterSpacing: '0.02em' }}>
           {label}
         </span>
         <Icon
-          size={18}
-          style={{ color: gradient ? 'var(--blue)' : 'var(--text-dim)' }}
+          size={16}
+          style={{ color: gradient ? 'var(--blue)' : 'var(--text-dim)', opacity: 0.5 }}
         />
       </div>
 
-      <div className="flex items-baseline gap-2 mb-2">
+      <div className="flex items-baseline gap-1 mb-1">
         <div
-          className={`text-3xl font-bold font-mono ${
-            gradient ? gradientClass : 'text-[var(--green)]'
-          }`}
+          className="text-[28px] font-extrabold font-mono tracking-tight"
+          style={{ color: valueColor || (gradient ? undefined : 'var(--green)'), lineHeight: 1.1 }}
         >
-          {displayValue}
-          {suffix}
+          {prefix}{displayValue}{suffix}
         </div>
       </div>
+
+      {subtitle && (
+        <p className="text-xs font-medium mt-1" style={{ color: subtitleColor || 'var(--text-dim)', opacity: 0.7 }}>
+          {subtitle}
+        </p>
+      )}
 
       {change && (
         <p className="text-xs opacity-60">
@@ -483,6 +491,146 @@ const AccountHealthCard = ({ account, stats }) => {
   );
 };
 
+// Mini Calendar Component
+const MINI_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const MiniCalendar = ({ trades }) => {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+
+  // Build daily PnL map
+  const dailyPnl = useMemo(() => {
+    const map = {};
+    (trades || []).forEach(t => {
+      const d = new Date(t.date);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        if (!map[t.date]) map[t.date] = { pnl: 0, count: 0, entries: [] };
+        map[t.date].pnl += getNetPnl(t);
+        map[t.date].count++;
+        t.entries.forEach(e => {
+          if (e.triggered && e.result) map[t.date].entries.push(e);
+        });
+      }
+    });
+    return map;
+  }, [trades, year, month]);
+
+  // Build grid (Monday-start)
+  const grid = useMemo(() => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDow = (firstDay.getDay() + 6) % 7; // Mon=0
+    const daysInMonth = lastDay.getDate();
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }, [year, month]);
+
+  const weeks = [];
+  for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
+
+  const today = now.getDate();
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+  const monthLabel = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const prev = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
+  const next = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.3 }}
+      className="rounded-[14px] p-5 border"
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xs font-semibold tracking-wide opacity-60" style={{ textTransform: 'uppercase' }}>{monthLabel}</h3>
+        <div className="flex gap-1">
+          <button onClick={prev} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--text-dim)' }}>
+            <ChevronLeft size={14} />
+          </button>
+          <button onClick={next} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--text-dim)' }}>
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Day headers */}
+      <div className="grid grid-cols-7 gap-0 mb-1">
+        {MINI_DAYS.map(d => (
+          <div key={d} className="text-center text-[10px] font-semibold opacity-40 py-1">{d}</div>
+        ))}
+      </div>
+
+      {/* Weeks */}
+      {weeks.map((week, wi) => (
+        <div key={wi} className="grid grid-cols-7 gap-0">
+          {week.map((day, di) => {
+            if (!day) return <div key={di} className="h-9" />;
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const data = dailyPnl[dateStr];
+            const isToday = isCurrentMonth && day === today;
+            const hasTrades = !!data;
+            const isWin = hasTrades && data.pnl > 0;
+            const isLoss = hasTrades && data.pnl < 0;
+
+            return (
+              <div
+                key={di}
+                className="h-9 flex flex-col items-center justify-center rounded-md relative"
+                style={{
+                  background: isWin ? 'var(--green-dim)' : isLoss ? 'var(--red-dim)' : 'transparent',
+                  border: isToday ? '2px solid var(--blue)' : '2px solid transparent',
+                }}
+              >
+                <span className="text-xs font-semibold" style={{
+                  color: isToday ? 'var(--blue)' : hasTrades ? 'var(--text)' : 'var(--text-dim)',
+                  opacity: hasTrades || isToday ? 1 : 0.4,
+                }}>{day}</span>
+                {hasTrades && (
+                  <span className="text-[8px] font-bold font-mono leading-none" style={{
+                    color: isWin ? 'var(--green)' : 'var(--red)',
+                  }}>
+                    {isWin ? '+' : ''}{formatPnl(data.pnl)}
+                  </span>
+                )}
+                {hasTrades && (
+                  <div className="absolute bottom-0.5 flex gap-0.5">
+                    {data.entries.slice(0, 3).map((e, i) => (
+                      <div key={i} className="w-1 h-1 rounded-full" style={{
+                        background: e.result === 'W' ? 'var(--green)' : 'var(--red)',
+                      }} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      {/* Legend */}
+      <div className="flex gap-3 mt-3 justify-center">
+        {[
+          { color: 'var(--green)', label: 'E1 win' },
+          { color: 'var(--orange)', label: 'E2 BE' },
+          { color: 'var(--red)', label: 'Loss' },
+          { color: 'var(--blue)', label: 'E3 win' },
+        ].map(({ color, label }) => (
+          <div key={label} className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+            <span className="text-[10px] opacity-50">{label}</span>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+};
+
 // Recent Trades List
 const RecentTradesList = ({ trades, onEditTrade }) => {
   if (!trades || trades.length === 0) {
@@ -634,31 +782,40 @@ export default function Dashboard({ state, openEditTrade }) {
     getAccountStats(account, state.trades || [], state.settings)
   );
 
+  // Compute week-over-week change for idea WR
+  const weekStats = calcStats(state.trades || [], 'week');
+  const weekWrPct = (weekStats.ideaWR || 0) * 100;
+  const monthWrPct = (stats.ideaWR || 0) * 100;
+  const wrDiff = weekWrPct - monthWrPct;
+
+  // Period label for subtitles
+  const periodLabel = period === 'Week' ? 'this week' : period === 'Month' ? new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'all time';
+
   // Count up animations
   const ideaWr = useCountUp((stats.ideaWR || 0) * 100, 1200);
   const entryWr = useCountUp((stats.entryWR || 0) * 100, 1200);
   const totalRVal = useCountUp(stats.totalR || 0, 1200);
-  const netPnlValue = useCountUp(stats.totalPnl || 0, 1200);
+  const netPnlValue = useCountUp(Math.abs(stats.totalPnl || 0), 1200);
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header Row */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>
+        <h1 className="text-[26px] font-extrabold tracking-tight" style={{ color: 'var(--text)' }}>
           Dashboard
         </h1>
 
         {/* Period Tabs */}
-        <div className="flex gap-2">
+        <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--surface)' }}>
           {['Week', 'Month', 'All Time'].map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+              className="px-4 py-1.5 rounded-md text-sm font-semibold transition-all"
               style={{
-                background: period === p ? 'var(--blue)' : 'var(--card)',
-                color: period === p ? 'white' : 'var(--text-dim)',
-                border: period === p ? 'none' : '1px solid var(--border)',
+                background: period === p ? 'var(--card)' : 'transparent',
+                color: period === p ? 'var(--text)' : 'var(--text-dim)',
+                boxShadow: period === p ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
               }}
             >
               {p}
@@ -675,8 +832,9 @@ export default function Dashboard({ state, openEditTrade }) {
             label="Idea Win Rate"
             value={ideaWr}
             suffix="%"
-            gradientClass="bg-gradient-to-r from-green-400 to-green-600 bg-clip-text text-transparent"
-            gradient
+            valueColor="var(--green)"
+            subtitle={wrDiff !== 0 ? `${wrDiff > 0 ? '↑' : '↓'} ${Math.abs(wrDiff).toFixed(1)}% this week` : undefined}
+            subtitleColor={wrDiff >= 0 ? 'var(--green)' : 'var(--red)'}
           />
           <motion.div
             className="absolute inset-0 rounded-[14px] pointer-events-none"
@@ -699,22 +857,27 @@ export default function Dashboard({ state, openEditTrade }) {
           label="Entry Win Rate"
           value={entryWr}
           suffix="%"
-          gradientClass="bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent"
-          gradient
+          valueColor="var(--blue)"
+          subtitle={`across ${stats.totalEntries || 0} entries`}
         />
 
         <StatCard
           icon={Zap}
           label="Total R"
           value={totalRVal}
-          gradientClass="font-mono text-[var(--green)]"
+          prefix={stats.totalR >= 0 ? '+' : ''}
+          suffix="R"
+          valueColor={stats.totalR >= 0 ? 'var(--green)' : 'var(--red)'}
+          subtitle={`${stats.totalTrades || 0} ideas`}
         />
 
         <StatCard
           icon={DollarSign}
           label="Net P&L"
           value={netPnlValue}
-          gradientClass="font-mono text-[var(--green)]"
+          prefix={stats.totalPnl >= 0 ? '+$' : '-$'}
+          valueColor={stats.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'}
+          subtitle={periodLabel}
         />
       </div>
 
@@ -724,26 +887,27 @@ export default function Dashboard({ state, openEditTrade }) {
         <EquityCurveChart data={stats.equityCurve} />
       </div>
 
-      {/* Row 3: Entry Performance + Recent Trades */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Row 3: Entry Performance + Account Health */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 2fr' }}>
         <EntryPerformance entries={entryPerformance} />
-        <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
+        <div>
+          <h2 className="text-xs font-semibold tracking-wide opacity-60 mb-3" style={{ textTransform: 'uppercase' }}>Account Rotation</h2>
+          <div className="grid grid-cols-3 gap-4">
+            {state.accounts.map((account, idx) => (
+              <AccountHealthCard
+                key={account.id}
+                account={account}
+                stats={accountStats[idx]}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Account Health Cards */}
-      <div>
-        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
-          Account Health
-        </h2>
-        <div className="grid grid-cols-3 gap-4">
-          {state.accounts.map((account, idx) => (
-            <AccountHealthCard
-              key={account.id}
-              account={account}
-              stats={accountStats[idx]}
-            />
-          ))}
-        </div>
+      {/* Row 4: Mini Calendar + Recent Trades */}
+      <div className="grid grid-cols-2 gap-4">
+        <MiniCalendar trades={state.trades} />
+        <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
       </div>
     </div>
   );
