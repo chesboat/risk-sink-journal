@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #13141a;
+  --card: #181921;
+  --border: rgba(255,255,255,0.06);
+  --border-hover: rgba(255,255,255,0.12);
+  --text: #f0f0f5;
+  --text-dim: #6b6b80;
+  --text-muted: #44445a;
+  --green: #30d158;
+  --green-dim: rgba(48,209,88,0.12);
+  --red: #ff453a;
+  --red-dim: rgba(255,69,58,0.12);
+  --blue: #0a84ff;
+  --blue-dim: rgba(10,132,255,0.12);
+  --orange: #ff9f0a;
+  --orange-dim: rgba(255,159,10,0.12);
+  --teal: #64d2ff;
+  --teal-dim: rgba(100,210,255,0.12);
+  --purple: #8b5cf6;
+  --purple-dim: rgba(139,92,246,0.12);
+  --accent: #0a84ff;
+}
+
+.light {
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --border: rgba(0,0,0,0.06);
+  --border-hover: rgba(0,0,0,0.12);
+  --text: #1d1d1f;
+  --text-dim: #86868b;
+  --text-muted: #aeaeb2;
+  --green-dim: rgba(48,209,88,0.08);
+  --red-dim: rgba(255,69,58,0.08);
+  --blue-dim: rgba(10,132,255,0.08);
+  --orange-dim: rgba(255,159,10,0.08);
+  --teal-dim: rgba(100,210,255,0.08);
+  --purple-dim: rgba(139,92,246,0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.4s ease, color 0.4s ease;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Scanner animation */
+.scanner-line {
+  position: absolute; top: 0; left: -100%; width: 100%; height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgba(10,132,255,0.5), transparent);
+  animation: scan 4s ease-in-out infinite;
+}
+.light .scanner-line {
+  background: linear-gradient(90deg, transparent, rgba(10,132,255,0.4), transparent);
+}
+
+@keyframes scan { 0% { left: -100%; } 100% { left: 100%; } }
+
+/* Gradient text */
+.grad-green {
+  background: linear-gradient(135deg, #30d158, #0fd18c);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.grad-blue {
+  background: linear-gradient(135deg, #0a84ff, #5ac8fa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.grad-purple {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Ring animation */
+@keyframes ring-fill {
+  from { stroke-dashoffset: 138.2; }
+}
