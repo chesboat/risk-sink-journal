@@ -9,6 +9,7 @@ import TradeLog from './pages/TradeLog'
 import Analytics from './pages/Analytics'
 import Accounts from './pages/Accounts'
 import TradeModal from './components/TradeModal'
+import TradeDetailView from './pages/TradeDetailView'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -30,6 +31,8 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showModal, setShowModal] = useState(false)
   const [editTrade, setEditTrade] = useState(null)
+  const [viewTrade, setViewTrade] = useState(null)
+  const [prevPage, setPrevPage] = useState(null)
   const [sidebarHover, setSidebarHover] = useState(false)
   const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured() ? 'syncing' : 'offline') // 'synced' | 'syncing' | 'offline'
   const isInitialSync = useRef(true)
@@ -117,9 +120,21 @@ export default function App() {
     setShowModal(true)
   }
 
+  // Click a trade → full-page detail view
+  const openViewTrade = (trade) => {
+    setPrevPage(page)
+    setViewTrade(trade)
+  }
+
+  // Edit button inside detail view → open modal
   const openEditTrade = (trade) => {
     setEditTrade(trade)
     setShowModal(true)
+  }
+
+  const closeDetailView = () => {
+    setViewTrade(null)
+    if (prevPage) setPage(prevPage)
   }
 
   const handleImport = async () => {
@@ -138,7 +153,21 @@ export default function App() {
   }
 
   const renderPage = () => {
-    const props = { state, openEditTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
+    // If viewing a trade detail, show it instead of any page
+    if (viewTrade) {
+      // Re-fetch from state in case it was just edited
+      const fresh = state.trades.find(t => t.id === viewTrade.id) || viewTrade
+      return (
+        <TradeDetailView
+          trade={fresh}
+          onBack={closeDetailView}
+          onEdit={openEditTrade}
+          onDelete={(id) => { deleteTradeHandler(id); closeDetailView() }}
+        />
+      )
+    }
+
+    const props = { state, openEditTrade: openViewTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />
@@ -180,7 +209,7 @@ export default function App() {
         {NAV.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setPage(id)}
+            onClick={() => { setPage(id); setViewTrade(null) }}
             className="flex items-center rounded-[10px] mb-1 cursor-pointer transition-all duration-200 whitespace-nowrap overflow-hidden"
             style={{
               width: sidebarHover ? 184 : 48,
@@ -247,7 +276,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 transition-all duration-300" style={{ marginLeft: 64, padding: '28px 32px' }}>
         <AnimatePresence mode="wait">
-          <motion.div key={page} {...pageTransition}>
+          <motion.div key={viewTrade ? `trade-${viewTrade.id}` : page} {...pageTransition}>
             {renderPage()}
           </motion.div>
         </AnimatePresence>
