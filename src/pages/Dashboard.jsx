@@ -904,11 +904,11 @@ export default function Dashboard({ state, openEditTrade }) {
         </div>
       </div>
 
-      {/* Row 4: Mini Calendar + Recent Trades */}
-      <div className="grid grid-cols-2 gap-4">
-        <MiniCalendar trades={state.trades} />
-        <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
-      </div>
+      {/* Row 4: Mini Calendar (full width) */}
+      <MiniCalendar trades={state.trades} />
+
+      {/* Row 5: Recent Trades (full width) */}
+      <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />
     </div>
   );
 }
