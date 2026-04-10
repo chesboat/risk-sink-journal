@@ -171,7 +171,7 @@ const RiskScoreCard = ({ score, breakdown }) => {
 
         {/* Right: Grade Breakdown */}
         <div className="flex flex-col justify-center gap-4">
-          {Object.entries(breakdown).map(([key, percentage]) => (
+          {Object.entries(breakdown || {}).map(([key, percentage]) => (
             <div key={key}>
               <div className="flex justify-between items-center mb-1">
                 <span className="text-xs font-medium capitalize opacity-70">
@@ -332,9 +332,10 @@ const EntryPerformance = ({ entries }) => {
 
 // Account Health Card
 const AccountHealthCard = ({ account, stats }) => {
-  const ptProgress = stats.ptProgress || 0;
-  const mllRemaining = stats.mllRemaining || 0;
-  const mllMax = stats.mllMax || 1;
+  const s = stats || {};
+  const ptProgress = s.ptPercent || 0;
+  const mllRemaining = s.mllLeft || 0;
+  const mllMax = (s.mllLeft || 0) + (s.mllUsed || 0) || 1;
 
   return (
     <motion.div
@@ -404,7 +405,7 @@ const AccountHealthCard = ({ account, stats }) => {
           <div>
             <p className="text-xs font-medium opacity-70">PT Progress</p>
             <p className="text-sm font-mono font-bold text-[var(--green)]">
-              {stats.ptAmount || '$0'}
+              ${Math.round(s.ptProgress || 0)}
             </p>
           </div>
         </div>
@@ -414,7 +415,7 @@ const AccountHealthCard = ({ account, stats }) => {
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs font-medium opacity-70">MLL Remaining</span>
             <span className="text-xs font-mono font-bold text-[var(--red)]">
-              {stats.mllRemaining || '$0'}
+              ${Math.round(mllRemaining)}
             </span>
           </div>
           <div
@@ -437,7 +438,7 @@ const AccountHealthCard = ({ account, stats }) => {
         <div className="pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
           <p className="text-xs opacity-60">Balance</p>
           <p className="text-lg font-mono font-bold text-[var(--text)]">
-            {stats.balance || '$0'}
+            ${Math.round(s.totalPnl || 0)}
           </p>
         </div>
       </div>
@@ -519,37 +520,33 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
 
               {/* Entry Dots */}
               <div className="flex gap-1 flex-shrink-0">
-                {[trade.e1, trade.e2, trade.e3].map((entry, i) => {
-                  if (!entry) return null;
-
-                  const isWin = entry.result === 'W';
-                  const isSkipped = entry.skipped;
-
+                {(trade.entries || []).map((entry, i) => {
+                  const colors = ['var(--green)', 'var(--orange)', 'var(--teal)'];
+                  if (!entry.triggered) {
+                    return (
+                      <div key={i} className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ border: '1.5px solid var(--text-muted)', background: 'transparent' }} />
+                    );
+                  }
                   return (
-                    <div
-                      key={i}
-                      className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                        isSkipped ? 'opacity-30' : ''
-                      }`}
-                      style={{
-                        background: isWin ? 'var(--green)' : 'var(--red)',
-                        border: isSkipped ? '1px solid var(--border)' : 'none',
-                      }}
-                    />
+                    <div key={i} className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ background: entry.result === 'W' ? colors[i] : 'var(--red)' }} />
                   );
                 })}
               </div>
 
               {/* Idea Result */}
-              <div
-                className="text-xs font-semibold px-2 py-1 rounded flex-shrink-0"
-                style={{
-                  background: ideaResult === 'W' ? 'var(--green)20' : 'var(--red)20',
-                  color: ideaResult === 'W' ? 'var(--green)' : 'var(--red)',
-                }}
-              >
-                {ideaResult}
-              </div>
+              {ideaResult && (
+                <div
+                  className="text-xs font-semibold px-2 py-1 rounded flex-shrink-0"
+                  style={{
+                    background: ideaResult === 'WIN' ? 'var(--green-dim)' : 'var(--red-dim)',
+                    color: ideaResult === 'WIN' ? 'var(--green)' : 'var(--red)',
+                  }}
+                >
+                  {ideaResult}
+                </div>
+              )}
 
               {/* Net R & P&L */}
               <div className="flex gap-4 flex-shrink-0 text-right">
@@ -584,38 +581,27 @@ export default function Dashboard({ state, openEditTrade }) {
   const [period, setPeriod] = useState('Month');
 
   // Calculate stats
-  const stats = calcStats(state.trades, period);
-  const riskScore = calcRiskScore(state.trades, state.accounts, state.settings);
+  const periodMap = { 'Week': 'week', 'Month': 'month', 'All Time': 'all' };
+  const stats = calcStats(state.trades || [], periodMap[period] || 'month');
+  const riskScore = calcRiskScore(state.trades || [], state.accounts || [], state.settings);
 
-  // Calculate entry performance
+  // Calculate entry performance from stats.byEntry
   const entryPerformance = {
-    E1: { wins: 0, total: 0 },
-    E2: { wins: 0, total: 0 },
-    E3: { wins: 0, total: 0 },
+    E1: { wins: (stats.byEntry?.[0]?.wins || 0), total: (stats.byEntry?.[0]?.trades || 0) },
+    E2: { wins: (stats.byEntry?.[1]?.wins || 0), total: (stats.byEntry?.[1]?.trades || 0) },
+    E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: (stats.byEntry?.[2]?.trades || 0) },
   };
-
-  state.trades.forEach((trade) => {
-    ['e1', 'e2', 'e3'].forEach((entry, idx) => {
-      if (trade[entry] && !trade[entry].skipped) {
-        const key = `E${idx + 1}`;
-        entryPerformance[key].total += 1;
-        if (trade[entry].result === 'W') {
-          entryPerformance[key].wins += 1;
-        }
-      }
-    });
-  });
 
   // Prepare account stats
   const accountStats = (state.accounts || []).map((account) =>
-    getAccountStats(account, state.trades)
+    getAccountStats(account, state.trades || [], state.settings)
   );
 
   // Count up animations
-  const ideaWr = useCountUp(stats.ideaWinRate, 1200);
-  const entryWr = useCountUp(stats.entryWinRate, 1200);
-  const totalR = useCountUp(stats.totalR, 1200);
-  const netPnlValue = useCountUp(stats.netPnl, 1200);
+  const ideaWr = useCountUp((stats.ideaWR || 0) * 100, 1200);
+  const entryWr = useCountUp((stats.entryWR || 0) * 100, 1200);
+  const totalRVal = useCountUp(stats.totalR || 0, 1200);
+  const netPnlValue = useCountUp(stats.totalPnl || 0, 1200);
 
   return (
     <div className="space-y-6 pb-12">
@@ -683,7 +669,7 @@ export default function Dashboard({ state, openEditTrade }) {
         <StatCard
           icon={Zap}
           label="Total R"
-          value={totalR}
+          value={totalRVal}
           gradientClass="font-mono text-[var(--green)]"
         />
 
@@ -696,7 +682,7 @@ export default function Dashboard({ state, openEditTrade }) {
       </div>
 
       {/* Risk Sink Score Card */}
-      <RiskScoreCard score={riskScore.score} breakdown={riskScore.breakdown} />
+      <RiskScoreCard score={riskScore.score || 0} breakdown={riskScore.grades || {}} />
 
       {/* Charts Row */}
       <div className="grid grid-cols-2 gap-6">

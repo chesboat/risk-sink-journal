@@ -206,8 +206,8 @@ const EditableField = ({ value, onChange, label, type = 'text', prefix = '' }) =
   );
 };
 
-const AccountCard = ({ account, onUpdate, settings }) => {
-  const stats = getAccountStats(account, settings);
+const AccountCard = ({ account, onUpdate, settings, trades }) => {
+  const stats = getAccountStats(account, trades || [], settings);
 
   const handleSlotChange = (newSlot) => {
     const oldSlot = account.slot;
@@ -236,7 +236,7 @@ const AccountCard = ({ account, onUpdate, settings }) => {
 
   const handleStartingPLChange = (newValue) => {
     const numValue = parseFloat(newValue) || 0;
-    onUpdate({ ...account, startingPL: numValue });
+    onUpdate({ ...account, startingPnl: numValue });
   };
 
   return (
@@ -280,7 +280,7 @@ const AccountCard = ({ account, onUpdate, settings }) => {
 
         {/* Starting P&L */}
         <EditableField
-          value={account.startingPL}
+          value={account.startingPnl}
           onChange={handleStartingPLChange}
           label="Starting P&L"
           type="number"
@@ -291,32 +291,23 @@ const AccountCard = ({ account, onUpdate, settings }) => {
           {/* Total P&L */}
           <div className="mb-4">
             <div className="text-xs text-gray-400 mb-1">Total P&L</div>
-            <div className="text-2xl font-bold text-white">
-              ${stats.totalPL.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+            <div className="text-2xl font-bold" style={{ color: (stats.totalPnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              ${(stats.totalPnl || 0).toFixed(2)}
             </div>
           </div>
 
           {/* PT Progress */}
           <div className="flex items-center gap-4 mb-4">
             <div className="flex items-center justify-center relative" style={{ width: 52, height: 52 }}>
-              <ProgressRing percentage={stats.ptPercent} />
+              <ProgressRing percentage={stats.ptPercent || 0} />
               <div className="absolute text-xs font-semibold text-white">
-                {Math.round(stats.ptPercent)}%
+                {Math.round(stats.ptPercent || 0)}%
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-400">PT Progress</div>
               <div className="text-sm text-white">
-                ${stats.pnlTowardsPT.toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })} / ${stats.profitTarget.toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                ${(stats.ptProgress || 0).toFixed(0)} / ${(settings?.profitTarget || 3000).toFixed(0)}
               </div>
             </div>
           </div>
@@ -324,12 +315,9 @@ const AccountCard = ({ account, onUpdate, settings }) => {
           {/* MLL Remaining */}
           <div className="mb-4">
             <ProgressBar
-              percentage={stats.mllPercent}
-              label={`$${stats.mllRemaining.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })} remaining`}
-              color={stats.mllPercent > 50 ? '#22c55e' : stats.mllPercent > 25 ? '#f97316' : '#ef4444'}
+              percentage={stats.mllPercent || 0}
+              label={`$${(stats.mllLeft || 0).toFixed(0)} remaining`}
+              color={(stats.mllPercent || 0) > 50 ? '#22c55e' : (stats.mllPercent || 0) > 25 ? '#f97316' : '#ef4444'}
             />
           </div>
 
@@ -337,7 +325,7 @@ const AccountCard = ({ account, onUpdate, settings }) => {
           <div>
             <div className="text-xs text-gray-400 mb-2">Slot Win Rate</div>
             <div className="text-lg font-semibold text-white">
-              {stats.slotWinRate.toFixed(1)}%
+              {((stats.slotWR || 0) * 100).toFixed(1)}%
             </div>
           </div>
         </div>
@@ -580,6 +568,7 @@ const Accounts = ({ state, updateAccounts, updateSettings }) => {
           <AccountCard
             key={account.id}
             account={account}
+            trades={state.trades}
             onUpdate={handleAccountUpdate}
             settings={state.settings}
           />
