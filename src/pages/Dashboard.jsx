@@ -708,7 +708,7 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
           const ideaResult = getIdeaResult(trade);
           const netR = getNetR(trade);
           const netPnl = formatPnl(getNetPnl(trade));
-          const date = new Date(trade.date).toLocaleDateString('en-US', {
+          const date = new Date(trade.date + 'T00:00:00').toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
           });

@@ -156,10 +156,10 @@ export function calcStats(trades, period = 'all') {
   if (period === 'week') {
     const weekAgo = new Date(now);
     weekAgo.setDate(weekAgo.getDate() - 7);
-    filtered = trades.filter(t => new Date(t.date) >= weekAgo);
+    filtered = trades.filter(t => new Date(t.date + 'T00:00:00') >= weekAgo);
   } else if (period === 'month') {
     filtered = trades.filter(t => {
-      const d = new Date(t.date);
+      const d = new Date(t.date + 'T00:00:00');
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     });
   }
@@ -220,7 +220,7 @@ export function calcStats(trades, period = 'all') {
 
   // Streaks
   const results = completedTrades
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .sort((a, b) => new Date(a.date + 'T00:00:00') - new Date(b.date + 'T00:00:00'))
     .map(t => getIdeaResult(t));
   let currentStreak = 0, bestWin = 0, worstLoss = 0, streak = 0, lastResult = null;
   results.forEach(r => {
@@ -413,7 +413,7 @@ export function getBehavioralFlags(trades) {
   });
 
   // Revenge trading: loss followed by trade within same session
-  const sorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date) || a.createdAt - b.createdAt);
+  const sorted = [...trades].sort((a, b) => new Date(a.date + 'T00:00:00') - new Date(b.date + 'T00:00:00') || a.createdAt - b.createdAt);
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1];
     const curr = sorted[i];

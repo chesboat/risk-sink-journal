@@ -10,6 +10,10 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ]
 
+// Local date string helper (avoids UTC shift from toISOString)
+const toDateStr = (y, m, d) =>
+  `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+
 // Generate calendar grid starting on Sunday
 function buildCalendarGrid(year, month) {
   const firstDay = new Date(year, month, 1)
@@ -62,7 +66,7 @@ export default function CalendarPage({ state, openEditTrade }) {
   // Get day stats
   const getDayStats = (dayObj) => {
     if (!dayObj.inMonth) return null
-    const dateStr = new Date(year, month, dayObj.day).toISOString().slice(0, 10)
+    const dateStr = toDateStr(year, month, dayObj.day)
     const dayTrades = tradesByDate[dateStr]
     if (!dayTrades || dayTrades.length === 0) return null
 
@@ -97,7 +101,7 @@ export default function CalendarPage({ state, openEditTrade }) {
 
       week.forEach(dayObj => {
         if (!dayObj.inMonth) return
-        const dateStr = new Date(year, month, dayObj.day).toISOString().slice(0, 10)
+        const dateStr = toDateStr(year, month, dayObj.day)
         const dayTrades = tradesByDate[dateStr]
         if (!dayTrades || dayTrades.length === 0) return
         tradeDays++
@@ -115,7 +119,7 @@ export default function CalendarPage({ state, openEditTrade }) {
 
     weeks.flat().forEach(dayObj => {
       if (!dayObj.inMonth) return
-      const dateStr = new Date(year, month, dayObj.day).toISOString().slice(0, 10)
+      const dateStr = toDateStr(year, month, dayObj.day)
       const dayTrades = tradesByDate[dateStr]
       if (!dayTrades || dayTrades.length === 0) return
       tradeDays++
@@ -224,7 +228,7 @@ export default function CalendarPage({ state, openEditTrade }) {
                 const stats = getDayStats(dayObj)
                 const today = isToday(dayObj)
                 const hasTrades = !!stats
-                const dateStr = dayObj.inMonth ? new Date(year, month, dayObj.day).toISOString().slice(0, 10) : null
+                const dateStr = dayObj.inMonth ? toDateStr(year, month, dayObj.day) : null
 
                 return (
                   <div

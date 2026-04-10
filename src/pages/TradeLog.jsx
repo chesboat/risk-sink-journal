@@ -90,13 +90,12 @@ export default function TradeLog({
     }
 
     if (startDate) {
-      const start = new Date(startDate);
-      filtered = filtered.filter((trade) => new Date(trade.date) >= start);
+      const start = new Date(startDate + 'T00:00:00');
+      filtered = filtered.filter((trade) => new Date(trade.date + 'T00:00:00') >= start);
     }
     if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      filtered = filtered.filter((trade) => new Date(trade.date) <= end);
+      const end = new Date(endDate + 'T23:59:59');
+      filtered = filtered.filter((trade) => new Date(trade.date + 'T00:00:00') <= end);
     }
 
     filtered.sort((a, b) => {
