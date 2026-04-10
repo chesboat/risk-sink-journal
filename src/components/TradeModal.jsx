@@ -38,11 +38,11 @@ function MultiChip({ label, selected, onClick, color }) {
   return (
     <button
       onClick={onClick}
-      className="px-2.5 py-1 rounded-lg text-[12px] font-medium transition-all duration-200 cursor-pointer border-0"
+      className="px-2.5 py-1 rounded-lg text-[12px] font-semibold transition-all duration-200 cursor-pointer border-0"
       style={{
-        background: selected ? (color || 'rgba(10,132,255,0.15)') : 'var(--surface)',
-        color: selected ? (color || 'var(--accent)') : 'var(--text-muted)',
-        border: `1px solid ${selected ? (color || 'var(--accent)') : 'var(--border)'}`,
+        background: selected ? (color || 'var(--accent)') : 'var(--surface)',
+        color: selected ? '#fff' : 'var(--text-dim)',
+        border: `1px solid ${selected ? 'transparent' : 'var(--border)'}`,
       }}
     >
       {label}
@@ -589,7 +589,7 @@ export default function TradeModal({ trade, onSave, onClose }) {
         <div className="p-5 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
           <button
             onClick={handleSave}
-            className="w-full py-3 rounded-xl text-white font-semibold text-sm cursor-pointer border-0 transition-all hover:opacity-90"
+            className="w-full py-3 rounded-xl text-white keep-white font-semibold text-sm cursor-pointer border-0 transition-all hover:opacity-90"
             style={{ background: 'linear-gradient(135deg, var(--blue), var(--purple))' }}
           >
             {trade ? 'Update Trade' : 'Log Trade'}

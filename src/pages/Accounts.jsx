@@ -89,7 +89,7 @@ const SlotSelector = ({ value, onChange, label }) => {
             whileTap={{ scale: 0.95 }}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               value === slot
-                ? 'text-white'
+                ? 'text-white keep-white'
                 : 'bg-transparent text-gray-400 hover:text-gray-200'
             }`}
             style={{
@@ -113,7 +113,7 @@ const HealthChip = ({ status, onStatusChange }) => {
       <motion.button
         onClick={() => setIsOpen(!isOpen)}
         whileHover={{ scale: 1.05 }}
-        className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-all"
+        className="px-3 py-1.5 rounded-lg text-sm font-medium text-white keep-white transition-all"
         style={{ backgroundColor: HEALTH_COLOR_MAP[status] || '#9ca3af' }}
       >
         {status}

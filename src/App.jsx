@@ -236,7 +236,7 @@ export default function App() {
       >
         {/* Logo */}
         <div className="flex items-center px-4 mb-6 whitespace-nowrap">
-          <div className="w-8 h-8 rounded-[10px] flex-shrink-0 flex items-center justify-center font-mono font-bold text-sm text-white"
+          <div className="w-8 h-8 rounded-[10px] flex-shrink-0 flex items-center justify-center font-mono font-bold text-sm text-white keep-white"
             style={{ background: 'linear-gradient(135deg, var(--blue), var(--purple))' }}>
             RS
           </div>
@@ -336,7 +336,7 @@ export default function App() {
       {/* Floating New Trade Button */}
       <motion.button
         onClick={openNewTrade}
-        className="fixed bottom-7 right-8 z-40 flex items-center gap-2 px-6 py-3.5 rounded-2xl text-white font-semibold text-sm cursor-pointer border-0"
+        className="fixed bottom-7 right-8 z-40 flex items-center gap-2 px-6 py-3.5 rounded-2xl text-white keep-white font-semibold text-sm cursor-pointer border-0"
         style={{
           background: 'linear-gradient(135deg, var(--blue), var(--purple))',
           boxShadow: '0 4px 20px rgba(10,132,255,0.3)',

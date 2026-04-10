@@ -23,7 +23,7 @@ export default function AuthGate() {
         >
           {/* Logo */}
           <div
-            className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center font-mono font-bold text-xl text-white"
+            className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center font-mono font-bold text-xl text-white keep-white"
             style={{ background: 'linear-gradient(135deg, var(--blue), var(--purple))' }}
           >
             RS

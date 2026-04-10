@@ -32,20 +32,43 @@
   --bg: #f5f5f7;
   --surface: #ffffff;
   --card: #ffffff;
-  --border: rgba(0,0,0,0.06);
-  --border-hover: rgba(0,0,0,0.12);
+  --border: rgba(0,0,0,0.08);
+  --border-hover: rgba(0,0,0,0.16);
   --text: #1d1d1f;
-  --text-dim: #86868b;
-  --text-muted: #aeaeb2;
-  --green-dim: rgba(48,209,88,0.08);
-  --red-dim: rgba(255,69,58,0.08);
-  --blue-dim: rgba(10,132,255,0.08);
-  --orange-dim: rgba(255,159,10,0.08);
-  --teal-dim: rgba(100,210,255,0.08);
-  --purple-dim: rgba(139,92,246,0.08);
+  --text-dim: #4a4a52;
+  --text-muted: #6e6e78;
+  --green: #248a3d;
+  --red: #d70015;
+  --blue: #0066cc;
+  --orange: #c93400;
+  --teal: #0071a4;
+  --purple: #5e30c9;
+  --green-dim: rgba(48,209,88,0.14);
+  --red-dim: rgba(255,69,58,0.14);
+  --blue-dim: rgba(10,132,255,0.14);
+  --orange-dim: rgba(255,159,10,0.14);
+  --teal-dim: rgba(100,210,255,0.14);
+  --purple-dim: rgba(139,92,246,0.14);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Light mode: override hardcoded text-white on cards to use theme text.
+   Elements that should stay white on colored backgrounds (gradient buttons,
+   logo badges, etc.) should add the `keep-white` class. */
+.light .text-white:not(.keep-white) { color: var(--text) !important; }
+
+/* Light mode: neutralize Tailwind gray text classes that were tuned for dark bg */
+.light .text-gray-400,
+.light .text-gray-500 { color: var(--text-dim) !important; }
+.light .text-gray-300,
+.light .text-gray-200 { color: var(--text) !important; }
+.light .text-gray-600,
+.light .text-gray-700 { color: var(--text-muted) !important; }
+.light .border-gray-700,
+.light .border-gray-600 { border-color: var(--border) !important; }
+.light .bg-gray-800,
+.light .bg-gray-900 { background: var(--surface) !important; }
 
 body {
   font-family: 'Inter', -apple-system, system-ui, sans-serif;
