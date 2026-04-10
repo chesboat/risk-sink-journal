@@ -269,8 +269,9 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
             </h3>
             <div className="space-y-2.5">
               {entries.map((entry, i) => {
-                const label = ENTRY_LABELS[i] || `E${i + 1}`
-                const color = ENTRY_COLORS[i] || '#888'
+                const slot = entry.slot || (i + 1)
+                const label = ENTRY_LABELS[slot] || `E${slot}`
+                const color = ENTRY_COLORS[slot] || '#888'
                 const isTriggered = entry.triggered && entry.result
                 return (
                   <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ background: 'var(--surface)' }}>
