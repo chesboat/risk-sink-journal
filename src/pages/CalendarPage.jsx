@@ -415,8 +415,8 @@ export default function CalendarPage({ state, openEditTrade }) {
                           className="px-2 py-0.5 rounded-lg text-[11px] font-semibold flex items-center gap-1"
                           style={{
                             background: 'var(--card)',
-                            color: entry.result === 'W' ? ENTRY_COLORS[entry.slot] : entry.result === 'L' ? 'var(--red)' : 'var(--text-dim)',
-                            border: `1px solid ${entry.result === 'W' ? ENTRY_COLORS[entry.slot] : entry.result === 'L' ? 'var(--red)' : 'var(--border)'}`,
+                            color: entry.result === 'W' ? 'var(--green)' : entry.result === 'L' ? 'var(--red)' : 'var(--text-dim)',
+                            border: `1px solid ${entry.result === 'W' ? 'var(--green)' : entry.result === 'L' ? 'var(--red)' : 'var(--border)'}`,
                           }}
                         >
                           <span>E{entry.slot}</span>

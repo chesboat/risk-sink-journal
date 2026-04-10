@@ -630,23 +630,32 @@ const MiniCalendar = ({ trades }) => {
                     </span>
                   )}
 
-                  {hasTrades && (
-                    <div className="flex gap-[3px] mt-1.5">
-                      {data.entries.slice(0, 3).map((e, j) => (
-                        <div
-                          key={j}
-                          className="rounded-full"
-                          style={{
-                            width: 6,
-                            height: 6,
-                            background: e.result === 'W'
-                              ? (e.slot === 1 ? 'var(--green)' : e.slot === 2 ? 'var(--orange)' : 'var(--blue)')
-                              : 'var(--red)',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  {hasTrades && (() => {
+                    const es = data.entries.slice(0, 3)
+                    const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W')
+                    const rescue = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L')
+                    return (
+                      <div className="flex gap-[3px] mt-1.5 items-center">
+                        {es.map((e, j) => {
+                          if (!e.triggered) {
+                            return (
+                              <div key={j} className="rounded-full" style={{
+                                width: 6, height: 6,
+                                border: '1px solid var(--text-muted)', background: 'transparent',
+                              }} />
+                            )
+                          }
+                          return (
+                            <div key={j} className="rounded-full" style={{
+                              width: 6, height: 6,
+                              background: e.result === 'W' ? 'var(--green)' : e.result === 'L' ? 'var(--red)' : 'var(--text-dim)',
+                            }} />
+                          )
+                        })}
+                        {rescue && <span className="text-[8px] leading-none ml-0.5" title="Rescue">⚡</span>}
+                      </div>
+                    )
+                  })()}
                 </div>
               );
             })}
@@ -654,19 +663,24 @@ const MiniCalendar = ({ trades }) => {
         ))}
       </div>
 
-      {/* Legend */}
-      <div className="flex gap-4 mt-4 justify-center">
-        {[
-          { color: 'var(--green)', label: 'E1 win' },
-          { color: 'var(--orange)', label: 'E2 BE' },
-          { color: 'var(--red)', label: 'Loss' },
-          { color: 'var(--blue)', label: 'E3 win' },
-        ].map(({ color, label }) => (
-          <div key={label} className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ background: color }} />
-            <span className="text-[11px] opacity-50 font-medium">{label}</span>
-          </div>
-        ))}
+      {/* Legend — position-fixed: slot1=Lucid, slot2=Tradeify, slot3=Topstep */}
+      <div className="flex gap-4 mt-4 justify-center items-center flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full" style={{ background: 'var(--green)' }} />
+          <span className="text-[11px] opacity-50 font-medium">Win</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full" style={{ background: 'var(--red)' }} />
+          <span className="text-[11px] opacity-50 font-medium">Loss</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full" style={{ border: '1px solid var(--text-muted)', background: 'transparent' }} />
+          <span className="text-[11px] opacity-50 font-medium">Not triggered</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px]">⚡</span>
+          <span className="text-[11px] opacity-50 font-medium">Rescue</span>
+        </div>
       </div>
     </motion.div>
   );
@@ -746,21 +760,29 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
                 <p className="text-xs opacity-60">{trade.setup}</p>
               </div>
 
-              {/* Entry Dots */}
-              <div className="flex gap-1 flex-shrink-0">
+              {/* Entry Dots — position-fixed E1/E2/E3, green=win, red=loss, hollow=skipped */}
+              <div className="flex gap-1 flex-shrink-0 items-center" title="E1 · E2 · E3 (Lucid · Tradeify · Topstep)">
                 {(trade.entries || []).map((entry, i) => {
-                  const colors = ['var(--green)', 'var(--orange)', 'var(--teal)'];
                   if (!entry.triggered) {
                     return (
                       <div key={i} className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                         style={{ border: '1.5px solid var(--text-muted)', background: 'transparent' }} />
                     );
                   }
+                  const bg = entry.result === 'W' ? 'var(--green)' : entry.result === 'L' ? 'var(--red)' : 'var(--text-dim)'
                   return (
                     <div key={i} className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      style={{ background: entry.result === 'W' ? colors[i] : 'var(--red)' }} />
+                      style={{ background: bg }} />
                   );
                 })}
+                {(() => {
+                  const es = trade.entries || []
+                  const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W')
+                  const hadPriorLoss = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L')
+                  return hadPriorLoss ? (
+                    <span className="ml-0.5 text-[11px]" title="Risk sink rescue — later entry caught the win">⚡</span>
+                  ) : null
+                })()}
               </div>
 
               {/* Idea Result */}

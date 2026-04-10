@@ -192,9 +192,13 @@ export default function TradeLog({
       );
     }
 
+    const es = entries.slice(0, 3);
+    const firstWinIdx = es.findIndex(e => e.triggered && e.result === 'W');
+    const rescue = firstWinIdx > 0 && es.slice(0, firstWinIdx).some(e => e.triggered && e.result === 'L');
+
     return (
-      <div className="flex gap-1">
-        {entries.slice(0, 3).map((entry, idx) => {
+      <div className="flex gap-1 items-center">
+        {es.map((entry, idx) => {
           let bg = 'var(--text-muted)';
           let border = 'none';
           if (entry.triggered === false) {
@@ -202,9 +206,8 @@ export default function TradeLog({
             border = '1px solid var(--text-muted)';
           }
           if (entry.triggered === true) {
-            bg = entry.result === 'W' ? 'var(--green)' : 'var(--red)';
+            bg = entry.result === 'W' ? 'var(--green)' : entry.result === 'L' ? 'var(--red)' : 'var(--text-dim)';
           }
-          if (entry.result === 'BE') bg = 'var(--text-muted)';
 
           return (
             <div
@@ -214,6 +217,7 @@ export default function TradeLog({
             />
           );
         })}
+        {rescue && <span className="text-[10px] leading-none ml-0.5" title="Rescue — later entry caught the win">⚡</span>}
       </div>
     );
   };
