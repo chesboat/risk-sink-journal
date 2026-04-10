@@ -299,6 +299,13 @@ export default function TradeModal({ trade, onSave, onClose }) {
   const [form, setForm] = useState(initTrade)
   const [activeSection, setActiveSection] = useState('info') // 'info' | 'entries' | 'journal' | 'tags'
 
+  // Close on Escape key
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [onClose])
+
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }))
   const updateEntry = (idx, entry) => {
     setForm(f => ({ ...f, entries: f.entries.map((e, i) => i === idx ? entry : e) }))

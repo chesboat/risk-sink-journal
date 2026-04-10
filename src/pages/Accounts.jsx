@@ -120,11 +120,15 @@ const HealthChip = ({ status, onStatusChange }) => {
       </motion.button>
 
       {isOpen && (
+        <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+      )}
+      {isOpen && (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="absolute top-full mt-2 left-0 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10"
+          className="absolute top-full mt-2 left-0 rounded-lg shadow-lg z-20"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
         >
           {HEALTH_STATUSES.map((s) => (
             <button
@@ -133,19 +137,16 @@ const HealthChip = ({ status, onStatusChange }) => {
                 onStatusChange(s);
                 setIsOpen(false);
               }}
-              className="w-full px-4 py-2 text-left text-sm text-gray-100 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg transition-colors"
+              className="w-full px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors cursor-pointer border-0"
               style={{
-                backgroundColor: status === s ? HEALTH_COLOR_MAP[s] : 'transparent',
+                background: status === s ? HEALTH_COLOR_MAP[s] : 'transparent',
+                color: 'var(--text)',
               }}
             >
               {s}
             </button>
           ))}
         </motion.div>
-      )}
-
-      {isOpen && (
-        <div className="fixed inset-0" onClick={() => setIsOpen(false)} />
       )}
     </div>
   );

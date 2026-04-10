@@ -20,9 +20,9 @@ const NAV = [
 
 const pageTransition = {
   initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -12 },
-  transition: { duration: 0.25, ease: 'easeOut' },
+  animate: { opacity: 1, y: 0, pointerEvents: 'auto' },
+  exit: { opacity: 0, y: -12, pointerEvents: 'none' },
+  transition: { duration: 0.2, ease: 'easeOut' },
 }
 
 export default function App() {
