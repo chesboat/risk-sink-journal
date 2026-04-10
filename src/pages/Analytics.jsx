@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts'
-import { TrendingUp, Zap, Target, Smile, Shield } from 'lucide-react'
+import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
 import { calcStats, calcPooledHealth, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
 const COLORS = {
@@ -21,6 +21,8 @@ const tabTransition = {
 
 export default function Analytics({ state }) {
   const [activeTab, setActiveTab] = useState('overview')
+  const [showPooledInfo, setShowPooledInfo] = useState(false)
+  const [showMaxDdInfo, setShowMaxDdInfo] = useState(false)
   const stats = calcStats(state.trades, 'all')
 
   // Format percentage
@@ -120,6 +122,13 @@ export default function Analytics({ state }) {
               <div className="flex items-center gap-2 mb-1">
                 <Shield size={16} style={{ color: COLORS.blue }} />
                 <h3 className="text-sm font-semibold text-white">Pooled Risk Sink Health</h3>
+                <button
+                  onClick={() => setShowPooledInfo(v => !v)}
+                  className="opacity-50 hover:opacity-100 transition-opacity"
+                  title="How is this calculated?"
+                >
+                  <Info size={14} className="text-white" />
+                </button>
               </div>
               <div className="text-xs text-white opacity-50">All {pooled.perAccount.length} accounts treated as one system</div>
             </div>
@@ -130,6 +139,45 @@ export default function Analytics({ state }) {
               <div className="text-xs text-white opacity-50 mt-1">Combined P&L</div>
             </div>
           </div>
+
+          {showPooledInfo && (
+            <div
+              className="rounded-xl p-4 mb-4 border text-xs text-white leading-relaxed"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            >
+              <div className="font-semibold mb-2">Combined P&L</div>
+              <div className="opacity-70 mb-1">Sum of each account's current P&L (startingPnl + triggered entry P&L).</div>
+              <div className="font-mono opacity-60 mb-3">
+                {pooled.perAccount.map((a, i) => (
+                  <span key={a.id}>
+                    {a.name} {fmt(a.totalPnl)}
+                    {i < pooled.perAccount.length - 1 ? '  +  ' : '  =  '}
+                  </span>
+                ))}
+                <span className="font-semibold">{fmt(pooled.combinedPnl)}</span>
+              </div>
+
+              <div className="font-semibold mb-2">Pooled MLL Headroom</div>
+              <div className="opacity-70 mb-1">
+                Sum of each account's <span className="font-semibold">distance-to-bust</span> (current P&L minus its trailing MLL floor, capped at ${pooled.pooledMll / pooled.perAccount.length} per account). This is the total dollar drawdown the system can absorb before ANY single account busts — losses on one account don't rescue another's floor.
+              </div>
+              <div className="font-mono opacity-60 mb-3">
+                {pooled.perAccount.map((a, i) => (
+                  <span key={a.id}>
+                    {a.name} ${Math.round(Math.max(0, Math.min(pooled.pooledMll / pooled.perAccount.length, a.mllDistance))).toLocaleString()}
+                    {i < pooled.perAccount.length - 1 ? '  +  ' : '  =  '}
+                  </span>
+                ))}
+                <span className="font-semibold">${Math.round(pooled.pooledHeadroom).toLocaleString()}</span>
+                <span className="opacity-50"> of ${pooled.pooledMll.toLocaleString()}</span>
+              </div>
+
+              <div className="font-semibold mb-2">Trailing MLL (per account)</div>
+              <div className="opacity-70">
+                Each account's floor = min($0, peak P&L − ${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}). The floor trails $-for-$ with profit and locks at $0 once peak hits +${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}. Account busts the moment current P&L drops below its floor.
+              </div>
+            </div>
+          )}
 
           {/* Pooled MLL headroom bar */}
           <div className="mb-4">
@@ -201,9 +249,22 @@ export default function Analytics({ state }) {
           {...tabTransition}
         >
           <div className="flex items-start justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white mb-1">Max Combined Drawdown</h3>
-              <div className="text-xs text-white opacity-50">Deepest peak-to-trough the system has eaten</div>
+            <div className="flex items-start gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-white mb-1">Max Combined Drawdown</h3>
+                <div className="text-xs text-white opacity-50">Deepest peak-to-trough the system has eaten</div>
+              </div>
+              <button
+                onClick={() => setShowMaxDdInfo(!showMaxDdInfo)}
+                className="p-1 rounded-full border-0 cursor-pointer transition-colors"
+                style={{
+                  background: showMaxDdInfo ? 'var(--blue)' : 'var(--surface)',
+                  color: showMaxDdInfo ? '#fff' : 'var(--text-muted)',
+                }}
+                title="How is this calculated?"
+              >
+                <Info size={12} />
+              </button>
             </div>
             <div className="text-right">
               <div className="text-3xl font-bold" style={{ color: pooled.maxDdPctOfPool < 33 ? COLORS.green : pooled.maxDdPctOfPool < 66 ? COLORS.orange : COLORS.red }}>
@@ -214,6 +275,41 @@ export default function Analytics({ state }) {
               </div>
             </div>
           </div>
+
+          {showMaxDdInfo && (
+            <div
+              className="mb-4 p-3 rounded-xl text-xs"
+              style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+            >
+              <div className="font-semibold mb-2" style={{ color: 'var(--text)' }}>
+                How this is calculated
+              </div>
+              <div className="mb-2">
+                The deepest peak-to-trough dollar drop of the combined equity curve (all {(pooled.perAccount || []).length} accounts summed chronologically).
+              </div>
+              {pooled.maxDd > 0 ? (
+                <div className="font-mono text-[11px] mb-2 p-2 rounded" style={{ background: 'var(--card)' }}>
+                  <div>
+                    Peak: <span style={{ color: 'var(--green)' }}>${Math.round(pooled.maxDdPeak).toLocaleString()}</span>
+                    {pooled.maxDdPeakAt && <span className="opacity-60"> on {pooled.maxDdPeakAt}</span>}
+                  </div>
+                  <div>
+                    Trough: <span style={{ color: 'var(--red)' }}>${Math.round(pooled.maxDdPeak - pooled.maxDd).toLocaleString()}</span>
+                    {pooled.maxDdAt && <span className="opacity-60"> on {pooled.maxDdAt}</span>}
+                  </div>
+                  <div className="mt-1 pt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                    Drop: <span style={{ color: 'var(--red)', fontWeight: 700 }}>-${Math.round(pooled.maxDd).toLocaleString()}</span>
+                    {' '}= <span style={{ color: 'var(--orange)' }}>{Math.round(pooled.maxDdPctOfPool)}%</span> of ${pooled.pooledMll.toLocaleString()} pool
+                  </div>
+                </div>
+              ) : (
+                <div className="opacity-60 italic">No drawdown recorded yet — combined curve has not dropped below its peak.</div>
+              )}
+              <div className="opacity-70">
+                This is a <span className="font-semibold">system-wide</span> metric: a $500 drop on one account offset by a $500 gain on another contributes $0 to the combined drawdown. Individual account busts are tracked separately via trailing MLL.
+              </div>
+            </div>
+          )}
 
           <div className="h-3 rounded-full overflow-hidden mb-2" style={{ background: 'var(--surface)' }}>
             <div

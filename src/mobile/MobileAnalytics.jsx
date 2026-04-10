@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from 'recharts'
-import { Shield } from 'lucide-react'
+import { Shield, Info } from 'lucide-react'
 import { calcStats, calcPooledHealth, formatCurrency } from '../lib/store'
 
 const PERIODS = [
@@ -53,6 +53,8 @@ function Row({ label, value, color, bar }) {
 
 export default function MobileAnalytics({ state }) {
   const [period, setPeriod] = useState('all')
+  const [showPooledInfo, setShowPooledInfo] = useState(false)
+  const [showMaxDdInfo, setShowMaxDdInfo] = useState(false)
   const stats = useMemo(() => calcStats(state.trades || [], period), [state.trades, period])
 
   // Pooled Risk Sink Health — all-time snapshot of the combined account system.
@@ -213,16 +215,28 @@ export default function MobileAnalytics({ state }) {
         }}
       >
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <Shield size={12} style={{ color: 'var(--blue)' }} />
-              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                Pooled Health
+          <div className="flex items-start gap-1.5">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <Shield size={12} style={{ color: 'var(--blue)' }} />
+                <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  Pooled Health
+                </div>
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                All {pooled.perAccount.length} accounts as one system
               </div>
             </div>
-            <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              All {pooled.perAccount.length} accounts as one system
-            </div>
+            <button
+              onClick={() => setShowPooledInfo(!showPooledInfo)}
+              className="p-1 rounded-full border-0 cursor-pointer"
+              style={{
+                background: showPooledInfo ? 'var(--blue)' : 'var(--surface)',
+                color: showPooledInfo ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              <Info size={10} />
+            </button>
           </div>
           <div className="text-right">
             <div
@@ -236,6 +250,58 @@ export default function MobileAnalytics({ state }) {
             </div>
           </div>
         </div>
+
+        {showPooledInfo && (
+          <div
+            className="mb-3 p-2.5 rounded-xl text-[10px]"
+            style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+          >
+            <div className="font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
+              How this is calculated
+            </div>
+            <div className="mb-1.5">
+              <span className="font-semibold">Combined P&L</span> = sum of each account's current P&L.
+            </div>
+            <div className="font-mono p-1.5 rounded mb-1.5" style={{ background: 'var(--card)' }}>
+              {(pooled.perAccount || []).map((a) => (
+                <div key={a.id} className="flex justify-between">
+                  <span className="opacity-70 truncate mr-2">{a.name}</span>
+                  <span style={{ color: a.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {formatCurrency(a.totalPnl)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between pt-1 mt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold">Combined</span>
+                <span style={{ color: pooled.combinedPnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+                  {formatCurrency(pooled.combinedPnl)}
+                </span>
+              </div>
+            </div>
+            <div className="mb-1.5">
+              <span className="font-semibold">Pooled MLL Headroom</span> = sum of each account's distance-to-bust (capped at ${(pooled.pooledMll / (pooled.perAccount.length || 1)).toLocaleString()} per account).
+            </div>
+            <div className="font-mono p-1.5 rounded mb-1.5" style={{ background: 'var(--card)' }}>
+              {(pooled.perAccount || []).map((a) => (
+                <div key={a.id} className="flex justify-between">
+                  <span className="opacity-70 truncate mr-2">{a.name}</span>
+                  <span style={{ color: 'var(--text)' }}>
+                    {formatCurrency(Math.max(0, (a.mllInitial || 0) - (a.mllUsed || 0)))}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between pt-1 mt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold">Total</span>
+                <span style={{ color: 'var(--text)', fontWeight: 700 }}>
+                  {formatCurrency(pooled.pooledHeadroom)} / ${pooled.pooledMll.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <div className="opacity-70">
+              Each account uses a <span className="font-semibold">trailing MLL</span>: floor = min(0, peak − $2k). Once peak ≥ +$2k, floor locks at $0.
+            </div>
+          </div>
+        )}
 
         {/* Pooled MLL headroom bar */}
         <div className="mb-3">
@@ -301,13 +367,25 @@ export default function MobileAnalytics({ state }) {
         style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
       >
         <div className="flex items-center justify-between mb-2">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-              Max Combined Drawdown
+          <div className="flex items-start gap-1.5">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Max Combined Drawdown
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Deepest peak-to-trough the system ate
+              </div>
             </div>
-            <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              Deepest peak-to-trough the system ate
-            </div>
+            <button
+              onClick={() => setShowMaxDdInfo(!showMaxDdInfo)}
+              className="p-1 rounded-full border-0 cursor-pointer"
+              style={{
+                background: showMaxDdInfo ? 'var(--blue)' : 'var(--surface)',
+                color: showMaxDdInfo ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              <Info size={10} />
+            </button>
           </div>
           <div className="text-right">
             <div
@@ -328,6 +406,40 @@ export default function MobileAnalytics({ state }) {
             </div>
           </div>
         </div>
+        {showMaxDdInfo && (
+          <div
+            className="mb-3 p-2.5 rounded-xl text-[10px]"
+            style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+          >
+            <div className="font-semibold mb-1.5" style={{ color: 'var(--text)' }}>
+              How this is calculated
+            </div>
+            <div className="mb-1.5">
+              Deepest peak-to-trough drop of the combined equity curve (all {(pooled.perAccount || []).length} accounts summed chronologically).
+            </div>
+            {pooled.maxDd > 0 ? (
+              <div className="font-mono p-1.5 rounded mb-1.5" style={{ background: 'var(--card)' }}>
+                <div>
+                  Peak: <span style={{ color: 'var(--green)' }}>${Math.round(pooled.maxDdPeak).toLocaleString()}</span>
+                  {pooled.maxDdPeakAt && <span className="opacity-60"> on {pooled.maxDdPeakAt}</span>}
+                </div>
+                <div>
+                  Trough: <span style={{ color: 'var(--red)' }}>${Math.round(pooled.maxDdPeak - pooled.maxDd).toLocaleString()}</span>
+                  {pooled.maxDdAt && <span className="opacity-60"> on {pooled.maxDdAt}</span>}
+                </div>
+                <div className="mt-1 pt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                  Drop: <span style={{ color: 'var(--red)', fontWeight: 700 }}>-${Math.round(pooled.maxDd).toLocaleString()}</span>
+                  {' '}= <span style={{ color: 'var(--orange)' }}>{Math.round(pooled.maxDdPctOfPool)}%</span> of ${pooled.pooledMll.toLocaleString()}
+                </div>
+              </div>
+            ) : (
+              <div className="opacity-60 italic mb-1.5">No drawdown yet — combined curve hasn't dropped below its peak.</div>
+            )}
+            <div className="opacity-70">
+              System-wide metric: a $500 drop on one account offset by a $500 gain on another contributes $0 to the combined drawdown.
+            </div>
+          </div>
+        )}
         <div className="h-2 rounded-full overflow-hidden mb-1" style={{ background: 'var(--surface)' }}>
           <div
             className="h-full rounded-full transition-all"

@@ -534,17 +534,27 @@ export function calcPooledHealth(trades, accounts, settings) {
 
   // Peak-to-trough drawdown (in dollars) across the combined curve
   let peak = startingCombined
+  let peakDate = null
   let maxDd = 0
   let maxDdAt = null
+  let maxDdPeak = startingCombined
+  let maxDdPeakAt = null
   curve.forEach((pt) => {
-    if (pt.combined > peak) peak = pt.combined
+    if (pt.combined > peak) {
+      peak = pt.combined
+      peakDate = pt.date
+    }
     const dd = peak - pt.combined
     if (dd > maxDd) {
       maxDd = dd
       maxDdAt = pt.date
+      maxDdPeak = peak
+      maxDdPeakAt = peakDate
     }
   })
   const maxDdPctOfPool = (maxDd / pooledMll) * 100
+  const currentCombinedPeak = peak
+  const currentCombinedPeakAt = peakDate
 
   return {
     pooledMll,
@@ -560,7 +570,11 @@ export function calcPooledHealth(trades, accounts, settings) {
     curve,
     maxDd,
     maxDdAt,
+    maxDdPeak,
+    maxDdPeakAt,
     maxDdPctOfPool,
+    currentCombinedPeak,
+    currentCombinedPeakAt,
   }
 }
 
