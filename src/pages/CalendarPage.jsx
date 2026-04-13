@@ -49,6 +49,32 @@ export default function CalendarPage({ state, openEditTrade }) {
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
   const [selectedDate, setSelectedDate] = useState(null)
+  const [accountFilter, setAccountFilter] = useState(null) // null = all, or slot number
+
+  const accounts = state.accounts || []
+
+  // Filtered PnL/R helpers — when accountFilter is set, only count matching entries
+  const filteredPnl = (trade) => {
+    return trade.entries.reduce((sum, e) => {
+      if (!e.triggered) return sum
+      if (accountFilter != null && e.slot !== accountFilter) return sum
+      return sum + (e.pnl || 0)
+    }, 0)
+  }
+  const filteredR = (trade) => {
+    return trade.entries.reduce((sum, e) => {
+      if (!e.triggered) return sum
+      if (accountFilter != null && e.slot !== accountFilter) return sum
+      if (e.result === 'W') return sum + (e.r || 0)
+      if (e.result === 'L') return sum - 1
+      return sum // BE = 0
+    }, 0)
+  }
+  // Check if trade has any triggered entries for the filtered account
+  const tradeMatchesFilter = (trade) => {
+    if (accountFilter == null) return true
+    return trade.entries.some((e) => e.triggered && e.slot === accountFilter)
+  }
 
   // Group trades by date
   const tradesByDate = useMemo(() => {
@@ -63,37 +89,35 @@ export default function CalendarPage({ state, openEditTrade }) {
   // Build calendar grid
   const weeks = useMemo(() => buildCalendarGrid(year, month), [year, month])
 
-  // Get day stats
+  // Get day stats (respects account filter)
   const getDayStats = (dayObj) => {
     if (!dayObj.inMonth) return null
     const dateStr = toDateStr(year, month, dayObj.day)
     const dayTrades = tradesByDate[dateStr]
     if (!dayTrades || dayTrades.length === 0) return null
 
+    const matching = dayTrades.filter(tradeMatchesFilter)
+    if (matching.length === 0) return null
+
     let pnl = 0
     let totalR = 0
-    let hasWin = false
-    let hasLoss = false
 
-    dayTrades.forEach(trade => {
-      pnl += getNetPnl(trade)
-      totalR += getNetR(trade)
-      const result = getIdeaResult(trade)
-      if (result === 'WIN') hasWin = true
-      if (result === 'LOSS') hasLoss = true
+    matching.forEach(trade => {
+      pnl += filteredPnl(trade)
+      totalR += filteredR(trade)
     })
 
     return {
       pnl,
       totalR,
-      tradeCount: dayTrades.length,
+      tradeCount: matching.length,
       isWin: pnl > 0,
       isLoss: pnl < 0,
       dateStr,
     }
   }
 
-  // Weekly totals
+  // Weekly totals (respects account filter)
   const weeklyStats = useMemo(() => {
     return weeks.map((week, wi) => {
       let pnl = 0
@@ -104,15 +128,17 @@ export default function CalendarPage({ state, openEditTrade }) {
         const dateStr = toDateStr(year, month, dayObj.day)
         const dayTrades = tradesByDate[dateStr]
         if (!dayTrades || dayTrades.length === 0) return
+        const matching = dayTrades.filter(tradeMatchesFilter)
+        if (matching.length === 0) return
         tradeDays++
-        dayTrades.forEach(trade => { pnl += getNetPnl(trade) })
+        matching.forEach(trade => { pnl += filteredPnl(trade) })
       })
 
       return { pnl, tradeDays, weekNum: wi + 1 }
     })
-  }, [weeks, year, month, tradesByDate])
+  }, [weeks, year, month, tradesByDate, accountFilter])
 
-  // Monthly totals
+  // Monthly totals (respects account filter)
   const monthlyStats = useMemo(() => {
     let totalPnl = 0
     let tradeDays = 0
@@ -122,12 +148,14 @@ export default function CalendarPage({ state, openEditTrade }) {
       const dateStr = toDateStr(year, month, dayObj.day)
       const dayTrades = tradesByDate[dateStr]
       if (!dayTrades || dayTrades.length === 0) return
+      const matching = dayTrades.filter(tradeMatchesFilter)
+      if (matching.length === 0) return
       tradeDays++
-      dayTrades.forEach(trade => { totalPnl += getNetPnl(trade) })
+      matching.forEach(trade => { totalPnl += filteredPnl(trade) })
     })
 
     return { totalPnl, tradeDays }
-  }, [weeks, year, month, tradesByDate])
+  }, [weeks, year, month, tradesByDate, accountFilter])
 
   // Navigate months
   const goToday = () => {
@@ -186,9 +214,34 @@ export default function CalendarPage({ state, openEditTrade }) {
           </h2>
         </div>
 
-        {/* Monthly Stats Badge */}
+        {/* Account filter + Monthly Stats Badge */}
         <div className="flex items-center gap-3">
-          <span className="text-sm" style={{ color: 'var(--text-dim)' }}>Monthly stats:</span>
+          <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: 'var(--surface)' }}>
+            <button
+              onClick={() => setAccountFilter(null)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border-0 cursor-pointer transition-colors"
+              style={{
+                background: accountFilter == null ? 'var(--accent)' : 'transparent',
+                color: accountFilter == null ? '#fff' : 'var(--text-dim)',
+              }}
+            >
+              All
+            </button>
+            {accounts.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => setAccountFilter(a.slot)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border-0 cursor-pointer transition-colors"
+                style={{
+                  background: accountFilter === a.slot ? 'var(--accent)' : 'transparent',
+                  color: accountFilter === a.slot ? '#fff' : 'var(--text-dim)',
+                }}
+              >
+                {a.name}
+              </button>
+            ))}
+          </div>
+          <span className="text-sm" style={{ color: 'var(--text-dim)' }}>Monthly:</span>
           <span
             className="px-3 py-1 rounded-lg text-sm font-bold"
             style={{

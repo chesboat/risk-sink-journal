@@ -50,6 +50,9 @@ function TinyDot({ entry }) {
 export default function MobileCalendar({ state, openViewTrade }) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
+  const [accountFilter, setAccountFilter] = useState(null) // null = all, or slot number
+
+  const accounts = state.accounts || []
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
@@ -57,6 +60,28 @@ export default function MobileCalendar({ state, openViewTrade }) {
     month: 'long',
     year: 'numeric',
   })
+
+  // Filtered PnL/R helpers
+  const filteredPnl = (trade) => {
+    return trade.entries.reduce((sum, e) => {
+      if (!e.triggered) return sum
+      if (accountFilter != null && e.slot !== accountFilter) return sum
+      return sum + (e.pnl || 0)
+    }, 0)
+  }
+  const filteredR = (trade) => {
+    return trade.entries.reduce((sum, e) => {
+      if (!e.triggered) return sum
+      if (accountFilter != null && e.slot !== accountFilter) return sum
+      if (e.result === 'W') return sum + (e.r || 0)
+      if (e.result === 'L') return sum - 1
+      return sum
+    }, 0)
+  }
+  const tradeMatchesFilter = (trade) => {
+    if (accountFilter == null) return true
+    return trade.entries.some((e) => e.triggered && e.slot === accountFilter)
+  }
 
   // Group trades by date
   const tradesByDate = useMemo(() => {
@@ -84,12 +109,14 @@ export default function MobileCalendar({ state, openViewTrade }) {
       date = new Date(year, month + 1, d.day)
     }
     const dateStr = date.toISOString().slice(0, 10)
-    const trades = tradesByDate[dateStr] || []
-    const pnl = trades.reduce((s, t) => s + getNetPnl(t), 0)
+    const allTrades = tradesByDate[dateStr] || []
+    const trades = allTrades.filter(tradeMatchesFilter)
+    const pnl = trades.reduce((s, t) => s + filteredPnl(t), 0)
     // Merge entries across trades — show status of E1/E2/E3 for the day as a whole
-    const dayEntries = [1, 2, 3].map((slot) => {
-      // Find any triggered entry for this slot across all trades that day
-      for (const t of trades) {
+    // When filtered to a single account, only show that slot's dot
+    const slotsToShow = accountFilter != null ? [accountFilter] : [1, 2, 3]
+    const dayEntries = slotsToShow.map((slot) => {
+      for (const t of allTrades) {
         const e = (t.entries || []).find((en) => en.slot === slot && en.triggered)
         if (e) return e
       }
@@ -111,7 +138,7 @@ export default function MobileCalendar({ state, openViewTrade }) {
     }
   })
 
-  // Month totals
+  // Month totals (respects account filter)
   const monthStats = useMemo(() => {
     const inMonthCells = cells.filter((c) => c.inMonth)
     let pnl = 0
@@ -128,7 +155,7 @@ export default function MobileCalendar({ state, openViewTrade }) {
       })
     })
     return { pnl, trades, wins, losses }
-  }, [cells])
+  }, [cells, accountFilter])
 
   const selectedCell = selectedDate ? cells.find((c) => c.dateStr === selectedDate) : null
 
@@ -182,6 +209,35 @@ export default function MobileCalendar({ state, openViewTrade }) {
           {formatCurrency(monthStats.pnl)}
         </div>
       </div>
+
+      {/* Account filter */}
+      {accounts.length > 0 && (
+        <div className="flex gap-1 rounded-xl p-1 mb-3 overflow-x-auto" style={{ background: 'var(--surface)' }}>
+          <button
+            onClick={() => setAccountFilter(null)}
+            className="px-2.5 py-1 rounded-lg text-[10px] font-medium border-0 cursor-pointer whitespace-nowrap"
+            style={{
+              background: accountFilter == null ? 'var(--blue)' : 'transparent',
+              color: accountFilter == null ? '#fff' : 'var(--text-muted)',
+            }}
+          >
+            All
+          </button>
+          {accounts.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => setAccountFilter(a.slot)}
+              className="px-2.5 py-1 rounded-lg text-[10px] font-medium border-0 cursor-pointer whitespace-nowrap"
+              style={{
+                background: accountFilter === a.slot ? 'var(--blue)' : 'transparent',
+                color: accountFilter === a.slot ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              {a.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Day-of-week header */}
       <div className="grid grid-cols-7 gap-[4px] mb-1">
@@ -372,8 +428,8 @@ export default function MobileCalendar({ state, openViewTrade }) {
                   <div className="space-y-2">
                     {selectedCell.trades.map((trade) => {
                       const result = getIdeaResult(trade)
-                      const pnl = getNetPnl(trade)
-                      const r = getNetR(trade)
+                      const pnl = filteredPnl(trade)
+                      const r = filteredR(trade)
                       return (
                         <button
                           key={trade.id}
