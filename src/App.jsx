@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut } from 'lucide-react'
-import { loadState, saveState, getDefaultState, createTrade, exportData, importData } from './lib/store'
+import { loadState, saveState, getDefaultState, createTrade, exportData, importData, markTradeDeleted, getDeletedTradeIds, clearDeletedTradeIds } from './lib/store'
 import { isSupabaseConfigured, pullState, pushState, pushTrade, pushConfig, deleteTrade as supaDeleteTrade, getCurrentUser, onAuthChange, signOut } from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
@@ -76,10 +76,13 @@ export default function App() {
       if (!remote) { setSyncStatus('offline'); isInitialSync.current = false; return }
       setState(prev => {
         const defaults = getDefaultState()
-        // Merge trades: remote wins for duplicates, keep unique locals
+        const deletedIds = getDeletedTradeIds()
+        // Merge trades: remote wins for duplicates, keep unique locals,
+        // but NEVER resurrect trades that were deleted locally (tombstoned).
         const remoteIds = new Set((remote.trades || []).map(t => t.id))
-        const uniqueLocal = prev.trades.filter(t => !remoteIds.has(t.id))
-        const mergedTrades = [...(remote.trades || []), ...uniqueLocal]
+        const remoteTrades = (remote.trades || []).filter(t => !deletedIds.has(t.id))
+        const uniqueLocal = prev.trades.filter(t => !remoteIds.has(t.id) && !deletedIds.has(t.id))
+        const mergedTrades = [...remoteTrades, ...uniqueLocal]
         // Sort by date descending
         mergedTrades.sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt)
 
@@ -89,6 +92,13 @@ export default function App() {
           settings: { ...defaults.settings, ...(remote.settings || prev.settings) },
         }
       })
+      // Clean up: delete any tombstoned trades still lingering in Supabase
+      // (handles the case where the original supaDeleteTrade call failed).
+      const deletedIds = getDeletedTradeIds()
+      if (deletedIds.size > 0) {
+        deletedIds.forEach(id => supaDeleteTrade(id, user.id))
+      }
+      clearDeletedTradeIds()
       setSyncStatus('synced')
       isInitialSync.current = false
     })
@@ -136,6 +146,7 @@ export default function App() {
 
   const deleteTradeHandler = useCallback((id) => {
     setState(s => ({ ...s, trades: s.trades.filter(t => t.id !== id) }))
+    markTradeDeleted(id) // tombstone so merge won't resurrect it
     if (user) supaDeleteTrade(id, user.id) // fire and forget
   }, [user])
 

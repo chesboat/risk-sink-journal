@@ -66,6 +66,31 @@ export function saveState(state) {
   }
 }
 
+// ── Deleted-trade tombstones ──
+// Prevents the merge from resurrecting trades that were deleted locally
+// but still linger in localStorage from a previous save.
+const DELETED_KEY = 'risk-sink-journal-deleted';
+
+export function markTradeDeleted(tradeId) {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    if (!ids.includes(tradeId)) ids.push(tradeId);
+    localStorage.setItem(DELETED_KEY, JSON.stringify(ids));
+  } catch { /* best effort */ }
+}
+
+export function getDeletedTradeIds() {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch { return new Set(); }
+}
+
+export function clearDeletedTradeIds() {
+  try { localStorage.removeItem(DELETED_KEY); } catch { /* best effort */ }
+}
+
 export function exportData(state) {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
