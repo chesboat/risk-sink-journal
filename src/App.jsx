@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut } from 'lucide-react'
-import { loadState, saveState, getDefaultState, createTrade, exportData, importData, markTradeDeleted, getDeletedTradeIds, clearDeletedTradeIds } from './lib/store'
+import { loadState, saveState, getDefaultState, createTrade, exportData, importData, markTradeDeleted, getDeletedTradeIds, clearDeletedTradeIds, getSyncedTradeIds, setSyncedTradeIds } from './lib/store'
 import { isSupabaseConfigured, pullState, pushState, pushTrade, pushConfig, deleteTrade as supaDeleteTrade, getCurrentUser, onAuthChange, signOut } from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
@@ -74,16 +74,22 @@ export default function App() {
     setSyncStatus('syncing')
     pullState(user.id).then(remote => {
       if (!remote) { setSyncStatus('offline'); isInitialSync.current = false; return }
+      const deletedIds = getDeletedTradeIds()
+      const syncedIds = getSyncedTradeIds()
+      const remoteIds = new Set((remote.trades || []).map(t => t.id))
       setState(prev => {
         const defaults = getDefaultState()
-        const deletedIds = getDeletedTradeIds()
-        // Merge trades: remote wins for duplicates, keep unique locals,
-        // but NEVER resurrect trades that were deleted locally (tombstoned).
-        const remoteIds = new Set((remote.trades || []).map(t => t.id))
+        // Merge rules (all must hold for a local-only trade to survive):
+        //   1. Not tombstoned (not deleted locally)
+        //   2. Not previously synced (previously-synced-but-missing-from-remote = deleted on another device)
+        //   3. Not in remote (remote wins for duplicates)
         const remoteTrades = (remote.trades || []).filter(t => !deletedIds.has(t.id))
-        const uniqueLocal = prev.trades.filter(t => !remoteIds.has(t.id) && !deletedIds.has(t.id))
+        const uniqueLocal = prev.trades.filter(t =>
+          !remoteIds.has(t.id) &&
+          !deletedIds.has(t.id) &&
+          !syncedIds.has(t.id)
+        )
         const mergedTrades = [...remoteTrades, ...uniqueLocal]
-        // Sort by date descending
         mergedTrades.sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt)
 
         return {
@@ -94,11 +100,12 @@ export default function App() {
       })
       // Clean up: delete any tombstoned trades still lingering in Supabase
       // (handles the case where the original supaDeleteTrade call failed).
-      const deletedIds = getDeletedTradeIds()
       if (deletedIds.size > 0) {
         deletedIds.forEach(id => supaDeleteTrade(id, user.id))
       }
       clearDeletedTradeIds()
+      // Update synced snapshot to reflect current remote state after merge.
+      setSyncedTradeIds(remoteIds)
       setSyncStatus('synced')
       isInitialSync.current = false
     })
@@ -109,7 +116,14 @@ export default function App() {
     if (!isSupabaseConfigured() || !user || isInitialSync.current) return
     const timeout = setTimeout(() => {
       setSyncStatus('syncing')
-      pushState(state, user.id).then(() => setSyncStatus('synced')).catch(() => setSyncStatus('offline'))
+      pushState(state, user.id)
+        .then(() => {
+          // Snapshot the IDs we just pushed — these become "previously synced"
+          // for the next merge, so deletions from other devices can be detected.
+          setSyncedTradeIds(new Set((state.trades || []).map(t => t.id)))
+          setSyncStatus('synced')
+        })
+        .catch(() => setSyncStatus('offline'))
     }, 1000) // debounce 1s
     return () => clearTimeout(timeout)
   }, [state, user])

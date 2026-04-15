@@ -91,6 +91,25 @@ export function clearDeletedTradeIds() {
   try { localStorage.removeItem(DELETED_KEY); } catch { /* best effort */ }
 }
 
+// ── Synced-trade IDs ──
+// Records which trade IDs have been confirmed pushed to Supabase.
+// Used on merge to distinguish "remotely deleted" (previously synced, now missing)
+// from "genuinely new offline trade" (never synced).
+const SYNCED_KEY = 'risk-sink-journal-synced';
+
+export function getSyncedTradeIds() {
+  try {
+    const raw = localStorage.getItem(SYNCED_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch { return new Set(); }
+}
+
+export function setSyncedTradeIds(ids) {
+  try {
+    localStorage.setItem(SYNCED_KEY, JSON.stringify(Array.from(ids)));
+  } catch { /* best effort */ }
+}
+
 export function exportData(state) {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
