@@ -1,8 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut } from 'lucide-react'
-import { loadState, saveState, getDefaultState, createTrade, exportData, importData, markTradeDeleted, getDeletedTradeIds, clearDeletedTradeIds, getSyncedTradeIds, setSyncedTradeIds } from './lib/store'
-import { isSupabaseConfigured, pullState, pushState, pushTrade, pushConfig, deleteTrade as supaDeleteTrade, getCurrentUser, onAuthChange, signOut } from './lib/supabase'
+import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X } from 'lucide-react'
+import { getDefaultState, createTrade, exportData, importData } from './lib/store'
+import {
+  isSupabaseConfigured,
+  pullState,
+  pushTrade,
+  pushConfig,
+  deleteTrade as supaDeleteTrade,
+  replaceAllTrades,
+  getCurrentUser,
+  onAuthChange,
+  signOut,
+} from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
 import TradeLog from './pages/TradeLog'
@@ -31,22 +41,37 @@ const pageTransition = {
 
 export default function App() {
   const { isMobile, forceDesktop } = useIsMobile()
-  const [state, setState] = useState(loadState)
+  const [state, setState] = useState(getDefaultState)
   const [page, setPage] = useState('dashboard')
   const [showModal, setShowModal] = useState(false)
   const [editTrade, setEditTrade] = useState(null)
   const [viewTrade, setViewTrade] = useState(null)
   const [prevPage, setPrevPage] = useState(null)
   const [sidebarHover, setSidebarHover] = useState(false)
-  const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured() ? 'syncing' : 'offline') // 'synced' | 'syncing' | 'offline'
+  const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured() ? 'syncing' : 'offline') // 'synced' | 'syncing' | 'offline' | 'error'
+  const [syncError, setSyncError] = useState(null) // { message } | null
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(!isSupabaseConfigured())
-  const isInitialSync = useRef(true)
+  const [ready, setReady] = useState(!isSupabaseConfigured()) // first-pull gate
+  const pendingOps = useRef(0)
 
-  // Save to localStorage on every state change
-  useEffect(() => { saveState(state) }, [state])
+  // ── Sync status helpers ──
+  const markSyncing = useCallback(() => {
+    pendingOps.current += 1
+    setSyncStatus('syncing')
+  }, [])
+  const markSynced = useCallback(() => {
+    pendingOps.current = Math.max(0, pendingOps.current - 1)
+    if (pendingOps.current === 0) setSyncStatus('synced')
+  }, [])
+  const markError = useCallback((err) => {
+    pendingOps.current = Math.max(0, pendingOps.current - 1)
+    setSyncStatus('error')
+    setSyncError({ message: err?.message || String(err) || 'Sync failed' })
+  }, [])
+  const dismissError = () => { setSyncError(null); if (pendingOps.current === 0) setSyncStatus('synced') }
 
-  // Auth: check current session + subscribe to changes
+  // ── Auth: check current session + subscribe to changes ──
   useEffect(() => {
     if (!isSupabaseConfigured()) {
       setAuthChecked(true)
@@ -59,76 +84,51 @@ export default function App() {
     const unsub = onAuthChange((u) => {
       setUser(u)
       if (!u) {
-        // Signed out — reset to empty defaults so next user doesn't see stale data
-        isInitialSync.current = true
+        // Signed out — reset to empty defaults
         setState(getDefaultState())
+        setReady(true)
       }
     })
     return unsub
   }, [])
 
-  // Supabase: pull on mount (once user is known), merge with local
+  // ── Pull on mount (once user is known) — AUTHORITATIVE REMOTE ──
   useEffect(() => {
     if (!isSupabaseConfigured() || !user) return
-    isInitialSync.current = true
+    let cancelled = false
+    setReady(false)
     setSyncStatus('syncing')
-    pullState(user.id).then(remote => {
-      if (!remote) { setSyncStatus('offline'); isInitialSync.current = false; return }
-      const deletedIds = getDeletedTradeIds()
-      const syncedIds = getSyncedTradeIds()
-      const remoteIds = new Set((remote.trades || []).map(t => t.id))
-      setState(prev => {
-        const defaults = getDefaultState()
-        // Merge rules (all must hold for a local-only trade to survive):
-        //   1. Not tombstoned (not deleted locally)
-        //   2. Not previously synced (previously-synced-but-missing-from-remote = deleted on another device)
-        //   3. Not in remote (remote wins for duplicates)
-        const remoteTrades = (remote.trades || []).filter(t => !deletedIds.has(t.id))
-        const uniqueLocal = prev.trades.filter(t =>
-          !remoteIds.has(t.id) &&
-          !deletedIds.has(t.id) &&
-          !syncedIds.has(t.id)
-        )
-        const mergedTrades = [...remoteTrades, ...uniqueLocal]
-        mergedTrades.sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt)
-
-        return {
-          trades: mergedTrades,
-          accounts: remote.accounts || prev.accounts || defaults.accounts,
-          settings: { ...defaults.settings, ...(remote.settings || prev.settings) },
+    pullState(user.id)
+      .then(remote => {
+        if (cancelled) return
+        if (!remote) {
+          setSyncStatus('offline')
+          setReady(true)
+          return
         }
-      })
-      // Clean up: delete any tombstoned trades still lingering in Supabase
-      // (handles the case where the original supaDeleteTrade call failed).
-      if (deletedIds.size > 0) {
-        deletedIds.forEach(id => supaDeleteTrade(id, user.id))
-      }
-      clearDeletedTradeIds()
-      // Update synced snapshot to reflect current remote state after merge.
-      setSyncedTradeIds(remoteIds)
-      setSyncStatus('synced')
-      isInitialSync.current = false
-    })
-  }, [user])
-
-  // Supabase: push full state after initial sync merges
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !user || isInitialSync.current) return
-    const timeout = setTimeout(() => {
-      setSyncStatus('syncing')
-      pushState(state, user.id)
-        .then(() => {
-          // Snapshot the IDs we just pushed — these become "previously synced"
-          // for the next merge, so deletions from other devices can be detected.
-          setSyncedTradeIds(new Set((state.trades || []).map(t => t.id)))
-          setSyncStatus('synced')
+        const defaults = getDefaultState()
+        const trades = (remote.trades || []).slice().sort(
+          (a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt
+        )
+        setState({
+          trades,
+          accounts: remote.accounts || defaults.accounts,
+          settings: { ...defaults.settings, ...(remote.settings || {}) },
         })
-        .catch(() => setSyncStatus('offline'))
-    }, 1000) // debounce 1s
-    return () => clearTimeout(timeout)
-  }, [state, user])
+        setSyncStatus('synced')
+        setReady(true)
+      })
+      .catch(err => {
+        if (cancelled) return
+        console.error('Initial pull failed:', err)
+        markError(err)
+        // Still allow app to render with defaults so user isn't stuck
+        setReady(true)
+      })
+    return () => { cancelled = true }
+  }, [user, markError])
 
-  // Theme
+  // ── Theme ──
   useEffect(() => {
     if (state.settings.theme === 'light') {
       document.body.classList.add('light')
@@ -137,53 +137,124 @@ export default function App() {
     }
   }, [state.settings.theme])
 
-  const toggleTheme = () => {
-    setState(s => ({ ...s, settings: { ...s.settings, theme: s.settings.theme === 'dark' ? 'light' : 'dark' } }))
-  }
+  // ═══ Optimistic mutations with revert-on-failure ═══
 
-  // Trade CRUD
   const addTrade = useCallback((trade) => {
-    setState(s => ({ ...s, trades: [...s.trades, trade] }))
     setShowModal(false)
     setEditTrade(null)
-    // If we were in detail view, stay there but clear stale ref
-    // If not, viewTrade is already null so this is a no-op
-  }, [])
+    setState(s => ({ ...s, trades: [...s.trades, trade] }))
+    if (!user) return
+    markSyncing()
+    pushTrade(trade, user.id)
+      .then(markSynced)
+      .catch(err => {
+        console.error('Add trade sync failed:', err)
+        // Revert: remove the trade we just added
+        setState(s => ({ ...s, trades: s.trades.filter(t => t.id !== trade.id) }))
+        markError(err)
+      })
+  }, [user, markSyncing, markSynced, markError])
 
   const updateTrade = useCallback((trade) => {
-    setState(s => ({ ...s, trades: s.trades.map(t => t.id === trade.id ? trade : t) }))
     setShowModal(false)
     setEditTrade(null)
-    // Update the viewTrade ref so detail view shows fresh data
+    let prevTrade = null
+    setState(s => {
+      prevTrade = s.trades.find(t => t.id === trade.id) || null
+      return { ...s, trades: s.trades.map(t => t.id === trade.id ? trade : t) }
+    })
     setViewTrade(prev => prev?.id === trade.id ? trade : prev)
-  }, [])
+    if (!user) return
+    markSyncing()
+    pushTrade(trade, user.id)
+      .then(markSynced)
+      .catch(err => {
+        console.error('Update trade sync failed:', err)
+        if (prevTrade) {
+          setState(s => ({ ...s, trades: s.trades.map(t => t.id === trade.id ? prevTrade : t) }))
+          setViewTrade(prev => prev?.id === trade.id ? prevTrade : prev)
+        }
+        markError(err)
+      })
+  }, [user, markSyncing, markSynced, markError])
 
   const deleteTradeHandler = useCallback((id) => {
-    setState(s => ({ ...s, trades: s.trades.filter(t => t.id !== id) }))
-    markTradeDeleted(id) // tombstone so merge won't resurrect it
-    if (user) supaDeleteTrade(id, user.id) // fire and forget
-  }, [user])
+    let removed = null
+    setState(s => {
+      removed = s.trades.find(t => t.id === id) || null
+      return { ...s, trades: s.trades.filter(t => t.id !== id) }
+    })
+    if (!user) return
+    markSyncing()
+    supaDeleteTrade(id, user.id)
+      .then(markSynced)
+      .catch(err => {
+        console.error('Delete trade sync failed:', err)
+        // Revert: put the trade back
+        if (removed) {
+          setState(s => ({ ...s, trades: [...s.trades, removed] }))
+        }
+        markError(err)
+      })
+  }, [user, markSyncing, markSynced, markError])
 
   const updateAccounts = useCallback((accounts) => {
-    setState(s => ({ ...s, accounts }))
-  }, [])
+    let prev = null
+    setState(s => {
+      prev = { accounts: s.accounts, settings: s.settings }
+      return { ...s, accounts }
+    })
+    if (!user) return
+    markSyncing()
+    // Use current settings from the update we just applied
+    setState(s => {
+      pushConfig(accounts, s.settings, user.id)
+        .then(markSynced)
+        .catch(err => {
+          console.error('Accounts sync failed:', err)
+          setState(s2 => ({ ...s2, accounts: prev.accounts }))
+          markError(err)
+        })
+      return s
+    })
+  }, [user, markSyncing, markSynced, markError])
 
-  const updateSettings = useCallback((settings) => {
-    setState(s => ({ ...s, settings: { ...s.settings, ...settings } }))
-  }, [])
+  const updateSettings = useCallback((partial) => {
+    let prev = null
+    let merged = null
+    setState(s => {
+      prev = s.settings
+      merged = { ...s.settings, ...partial }
+      return { ...s, settings: merged }
+    })
+    if (!user) return
+    markSyncing()
+    setState(s => {
+      pushConfig(s.accounts, merged, user.id)
+        .then(markSynced)
+        .catch(err => {
+          console.error('Settings sync failed:', err)
+          setState(s2 => ({ ...s2, settings: prev }))
+          markError(err)
+        })
+      return s
+    })
+  }, [user, markSyncing, markSynced, markError])
+
+  const toggleTheme = () => {
+    updateSettings({ theme: state.settings.theme === 'dark' ? 'light' : 'dark' })
+  }
 
   const openNewTrade = () => {
     setEditTrade(null)
     setShowModal(true)
   }
 
-  // Click a trade → full-page detail view
   const openViewTrade = (trade) => {
     setPrevPage(page)
     setViewTrade(trade)
   }
 
-  // Edit button inside detail view → open modal
   const openEditTrade = (trade) => {
     setEditTrade(trade)
     setShowModal(true)
@@ -201,7 +272,18 @@ export default function App() {
     input.onchange = async (e) => {
       try {
         const data = await importData(e.target.files[0])
+        // Optimistic local update
         setState(data)
+        if (!user) return
+        markSyncing()
+        try {
+          await replaceAllTrades(data.trades || [], user.id)
+          await pushConfig(data.accounts, data.settings, user.id)
+          markSynced()
+        } catch (err) {
+          console.error('Import sync failed:', err)
+          markError(err)
+        }
       } catch (err) {
         alert('Failed to import: ' + err.message)
       }
@@ -210,9 +292,7 @@ export default function App() {
   }
 
   const renderPage = () => {
-    // If viewing a trade detail, show it instead of any page
     if (viewTrade) {
-      // Re-fetch from state in case it was just edited
       const fresh = state.trades.find(t => t.id === viewTrade.id) || viewTrade
       return (
         <TradeDetailView
@@ -237,7 +317,7 @@ export default function App() {
 
   const isLight = state.settings.theme === 'light'
 
-  // Auth gate: if Supabase is configured, require login
+  // Auth gate
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
@@ -249,10 +329,40 @@ export default function App() {
     return <AuthGate />
   }
 
-  // Mobile layout — separate component tree, same state
+  // Loading gate — wait for first pull so we don't show stale defaults then flash to real data
+  if (!ready) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="flex items-center gap-3">
+          <Cloud size={18} className="animate-pulse" style={{ color: 'var(--blue)' }} />
+          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading your journal…</div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Error banner (reusable) ──
+  const errorBanner = syncError && (
+    <div
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg max-w-md"
+      style={{ background: 'var(--red)', color: 'white' }}
+    >
+      <AlertCircle size={18} />
+      <div className="text-sm flex-1">
+        <div className="font-semibold">Sync failed</div>
+        <div className="opacity-90 text-xs">{syncError.message}. Change reverted.</div>
+      </div>
+      <button onClick={dismissError} className="p-1 cursor-pointer border-0 bg-transparent" style={{ color: 'white' }}>
+        <X size={16} />
+      </button>
+    </div>
+  )
+
+  // Mobile layout
   if (isMobile) {
     return (
       <>
+        {errorBanner}
         <MobileShell
           state={state}
           openNewTrade={openNewTrade}
@@ -282,6 +392,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen">
+      {errorBanner}
       {/* Sidebar */}
       <nav
         className="fixed left-0 top-0 bottom-0 z-50 flex flex-col items-center py-4 border-r transition-all duration-300 overflow-hidden"
@@ -340,9 +451,16 @@ export default function App() {
         {/* Bottom actions */}
         <div className="mt-auto flex flex-col gap-2 items-center">
           {isSupabaseConfigured() && (
-            <div className="p-2" title={syncStatus === 'synced' ? 'Synced to cloud' : syncStatus === 'syncing' ? 'Syncing...' : 'Offline — local only'}>
+            <div className="p-2" title={
+              syncStatus === 'synced' ? 'Synced to cloud'
+              : syncStatus === 'syncing' ? 'Syncing...'
+              : syncStatus === 'error' ? 'Sync error'
+              : 'Offline'
+            }>
               {syncStatus === 'offline' ? (
                 <CloudOff size={16} style={{ color: 'var(--text-muted)' }} />
+              ) : syncStatus === 'error' ? (
+                <AlertCircle size={16} style={{ color: 'var(--red)' }} />
               ) : (
                 <Cloud size={16} style={{ color: syncStatus === 'synced' ? 'var(--green)' : 'var(--orange)' }} className={syncStatus === 'syncing' ? 'animate-pulse' : ''} />
               )}

@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════
 // SUPABASE CLIENT & SYNC (multi-user, user_id scoped)
+// Authoritative-remote model: helpers throw on failure
+// so callers can implement optimistic-with-revert.
 // ═══════════════════════════════════════════════════
 import { createClient } from '@supabase/supabase-js';
 
@@ -47,132 +49,102 @@ export function onAuthChange(cb) {
 }
 
 // ═══════════════════════════════════════════════════
-// DATA SYNC (scoped by userId)
+// DATA SYNC (scoped by userId) — throw on failure
 // ═══════════════════════════════════════════════════
 
-// ── Push full state to Supabase ──
-export async function pushState(state, userId) {
-  if (!supabase || !userId) return;
-
-  try {
-    // Upsert trades
-    if (state.trades && state.trades.length > 0) {
-      const tradeRows = state.trades.map(t => ({
-        id: t.id,
-        user_id: userId,
-        data: t,
-        updated_at: new Date().toISOString(),
-      }));
-      const { error: tradeErr } = await supabase
-        .from('trades')
-        .upsert(tradeRows, { onConflict: 'id' });
-      if (tradeErr) console.error('Supabase trade push error:', tradeErr);
-    }
-
-    // Upsert accounts & settings — one row per user
-    const { error: configErr } = await supabase
-      .from('config')
-      .upsert({
-        user_id: userId,
-        accounts: state.accounts,
-        settings: state.settings,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-    if (configErr) console.error('Supabase config push error:', configErr);
-  } catch (err) {
-    console.error('Supabase push failed:', err);
-  }
-}
-
 // ── Pull full state from Supabase (scoped to current user) ──
+// Returns { trades, accounts, settings } or throws on failure.
+// Returns null only if supabase isn't configured.
 export async function pullState(userId) {
   if (!supabase || !userId) return null;
 
-  try {
-    // Fetch user's trades
-    const { data: tradeRows, error: tradeErr } = await supabase
-      .from('trades')
-      .select('id, data')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
+  // Fetch user's trades
+  const { data: tradeRows, error: tradeErr } = await supabase
+    .from('trades')
+    .select('id, data')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+  if (tradeErr) throw tradeErr;
 
-    if (tradeErr) {
-      console.error('Supabase trade pull error:', tradeErr);
-      return null;
-    }
+  // Fetch user's config
+  const { data: configRow, error: configErr } = await supabase
+    .from('config')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (configErr) throw configErr;
 
-    // Fetch user's config
-    const { data: configRow, error: configErr } = await supabase
-      .from('config')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+  const trades = tradeRows ? tradeRows.map(r => r.data) : [];
+  const accounts = configRow?.accounts || null;
+  const settings = configRow?.settings || null;
 
-    if (configErr) {
-      console.error('Supabase config pull error:', configErr);
-    }
+  return { trades, accounts, settings };
+}
 
-    const trades = tradeRows ? tradeRows.map(r => r.data) : [];
-    const accounts = configRow?.accounts || null;
-    const settings = configRow?.settings || null;
-
-    return { trades, accounts, settings };
-  } catch (err) {
-    console.error('Supabase pull failed:', err);
-    return null;
-  }
+// ── Push a single trade (upsert) ──
+export async function pushTrade(trade, userId) {
+  if (!supabase || !userId) return;
+  const { error } = await supabase
+    .from('trades')
+    .upsert({
+      id: trade.id,
+      user_id: userId,
+      data: trade,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+  if (error) throw error;
 }
 
 // ── Delete a trade from Supabase ──
 export async function deleteTrade(tradeId, userId) {
   if (!supabase || !userId) return;
-
-  try {
-    const { error } = await supabase
-      .from('trades')
-      .delete()
-      .eq('id', tradeId)
-      .eq('user_id', userId);
-    if (error) console.error('Supabase delete error:', error);
-  } catch (err) {
-    console.error('Supabase delete failed:', err);
-  }
-}
-
-// ── Push a single trade (for faster saves) ──
-export async function pushTrade(trade, userId) {
-  if (!supabase || !userId) return;
-
-  try {
-    const { error } = await supabase
-      .from('trades')
-      .upsert({
-        id: trade.id,
-        user_id: userId,
-        data: trade,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-    if (error) console.error('Supabase trade upsert error:', error);
-  } catch (err) {
-    console.error('Supabase trade upsert failed:', err);
-  }
+  const { error } = await supabase
+    .from('trades')
+    .delete()
+    .eq('id', tradeId)
+    .eq('user_id', userId);
+  if (error) throw error;
 }
 
 // ── Push config (accounts + settings) ──
 export async function pushConfig(accounts, settings, userId) {
   if (!supabase || !userId) return;
+  const { error } = await supabase
+    .from('config')
+    .upsert({
+      user_id: userId,
+      accounts,
+      settings,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
 
-  try {
-    const { error } = await supabase
-      .from('config')
-      .upsert({
-        user_id: userId,
-        accounts,
-        settings,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-    if (error) console.error('Supabase config push error:', error);
-  } catch (err) {
-    console.error('Supabase config push failed:', err);
+// ── Bulk push — used for import-data only ──
+export async function pushAllTrades(trades, userId) {
+  if (!supabase || !userId) return;
+  if (!trades || trades.length === 0) return;
+  const rows = trades.map(t => ({
+    id: t.id,
+    user_id: userId,
+    data: t,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase
+    .from('trades')
+    .upsert(rows, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+// ── Replace all trades — delete everything, then insert new set ──
+export async function replaceAllTrades(trades, userId) {
+  if (!supabase || !userId) return;
+  const { error: delErr } = await supabase
+    .from('trades')
+    .delete()
+    .eq('user_id', userId);
+  if (delErr) throw delErr;
+  if (trades && trades.length > 0) {
+    await pushAllTrades(trades, userId);
   }
 }

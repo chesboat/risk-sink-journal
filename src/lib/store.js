@@ -2,8 +2,6 @@
 // RISK SINK JOURNAL — Data Store & Calculations
 // ═══════════════════════════════════════════════════
 
-const STORAGE_KEY = 'risk-sink-journal';
-
 // ── Constants ──
 export const INSTRUMENTS = ['MNQ', 'MES', 'MYM'];
 export const SESSIONS = ['New York AM', 'New York PM', 'London', 'Asian'];
@@ -40,75 +38,9 @@ export function getDefaultState() {
 }
 
 // ── Persistence ──
-export function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return getDefaultState();
-    const parsed = JSON.parse(raw);
-    const defaults = getDefaultState();
-    return {
-      ...defaults,
-      ...parsed,
-      settings: { ...defaults.settings, ...(parsed.settings || {}) },
-      accounts: parsed.accounts || defaults.accounts,
-      trades: parsed.trades || defaults.trades,
-    };
-  } catch {
-    return getDefaultState();
-  }
-}
-
-export function saveState(state) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error('Failed to save:', e);
-  }
-}
-
-// ── Deleted-trade tombstones ──
-// Prevents the merge from resurrecting trades that were deleted locally
-// but still linger in localStorage from a previous save.
-const DELETED_KEY = 'risk-sink-journal-deleted';
-
-export function markTradeDeleted(tradeId) {
-  try {
-    const raw = localStorage.getItem(DELETED_KEY);
-    const ids = raw ? JSON.parse(raw) : [];
-    if (!ids.includes(tradeId)) ids.push(tradeId);
-    localStorage.setItem(DELETED_KEY, JSON.stringify(ids));
-  } catch { /* best effort */ }
-}
-
-export function getDeletedTradeIds() {
-  try {
-    const raw = localStorage.getItem(DELETED_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch { return new Set(); }
-}
-
-export function clearDeletedTradeIds() {
-  try { localStorage.removeItem(DELETED_KEY); } catch { /* best effort */ }
-}
-
-// ── Synced-trade IDs ──
-// Records which trade IDs have been confirmed pushed to Supabase.
-// Used on merge to distinguish "remotely deleted" (previously synced, now missing)
-// from "genuinely new offline trade" (never synced).
-const SYNCED_KEY = 'risk-sink-journal-synced';
-
-export function getSyncedTradeIds() {
-  try {
-    const raw = localStorage.getItem(SYNCED_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch { return new Set(); }
-}
-
-export function setSyncedTradeIds(ids) {
-  try {
-    localStorage.setItem(SYNCED_KEY, JSON.stringify(Array.from(ids)));
-  } catch { /* best effort */ }
-}
+// NOTE: localStorage sync was removed in favor of Supabase-as-source-of-truth.
+// State is now pulled from Supabase on auth and mutated via per-operation
+// pushes with optimistic UI + revert-on-failure. See App.jsx.
 
 export function exportData(state) {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
