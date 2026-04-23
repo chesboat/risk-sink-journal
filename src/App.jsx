@@ -54,6 +54,7 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(!isSupabaseConfigured())
   const [ready, setReady] = useState(!isSupabaseConfigured()) // first-pull gate
   const pendingOps = useRef(0)
+  const loadedUserId = useRef(null) // tracks which user we've already pulled for
 
   // ── Sync status helpers ──
   const markSyncing = useCallback(() => {
@@ -82,19 +83,30 @@ export default function App() {
       setAuthChecked(true)
     })
     const unsub = onAuthChange((u) => {
-      setUser(u)
-      if (!u) {
-        // Signed out — reset to empty defaults
-        setState(getDefaultState())
-        setReady(true)
-      }
+      // Only update user state when the identity actually changes (sign-in/sign-out),
+      // NOT on token refreshes — those fire every time you return to the tab and
+      // would re-trigger the pull effect, flashing the loading screen.
+      setUser(prev => {
+        const prevId = prev?.id || null
+        const newId = u?.id || null
+        if (prevId === newId) return prev // same user, keep same reference
+        if (!u) {
+          // Signed out — reset to empty defaults
+          loadedUserId.current = null
+          setState(getDefaultState())
+          setReady(true)
+        }
+        return u
+      })
     })
     return unsub
   }, [])
 
   // ── Pull on mount (once user is known) — AUTHORITATIVE REMOTE ──
+  // Only runs once per user identity, not on token refreshes.
   useEffect(() => {
     if (!isSupabaseConfigured() || !user) return
+    if (loadedUserId.current === user.id) return // already loaded for this user
     let cancelled = false
     setReady(false)
     setSyncStatus('syncing')
@@ -115,12 +127,14 @@ export default function App() {
           accounts: remote.accounts || defaults.accounts,
           settings: { ...defaults.settings, ...(remote.settings || {}) },
         })
+        loadedUserId.current = user.id
         setSyncStatus('synced')
         setReady(true)
       })
       .catch(err => {
         if (cancelled) return
         console.error('Initial pull failed:', err)
+        loadedUserId.current = user.id // don't retry endlessly on failure
         markError(err)
         // Still allow app to render with defaults so user isn't stuck
         setReady(true)
