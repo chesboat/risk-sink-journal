@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X } from 'lucide-react'
-import { getDefaultState, createTrade, exportData, importData } from './lib/store'
+import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles } from 'lucide-react'
+import { getDefaultState, createTrade, exportData, exportForAI, importData } from './lib/store'
 import {
   isSupabaseConfigured,
   pullState,
@@ -480,7 +480,10 @@ export default function App() {
               )}
             </div>
           )}
-          <button onClick={() => exportData(state)} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Export">
+          <button onClick={() => exportForAI(state)} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Export for AI analysis (Markdown)">
+            <Sparkles size={16} />
+          </button>
+          <button onClick={() => exportData(state)} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Export raw backup (JSON)">
             <Download size={16} />
           </button>
           <button onClick={handleImport} className="p-2 rounded-lg transition-colors border-0 cursor-pointer" style={{ color: 'var(--text-muted)', background: 'transparent' }} title="Import">

@@ -52,6 +52,335 @@ export function exportData(state) {
   URL.revokeObjectURL(url);
 }
 
+// ── AI-Friendly Export ──
+// Builds a self-contained Markdown document designed to be pasted into Claude
+// or ChatGPT. Includes:
+//   • a glossary explaining the risk-sink schema and account mapping (E1/E2/E3)
+//   • per-account settings, three-style description, and per-trade detail
+//     showing which account got the win on each idea
+//   • summary tables (idea-level, by entry, by setup, by session)
+//   • an analysis prompt asking the AI to simulate Styles 1/2/3 on this data
+// Screenshots are intentionally excluded — they'd blow up the file size.
+export function exportForAI(state) {
+  const md = buildAIMarkdown(state);
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `risk-sink-ai-export-${new Date().toISOString().slice(0,10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function buildAIMarkdown(state) {
+  const trades = state?.trades || [];
+  const accounts = state?.accounts || [];
+  const settings = state?.settings || {};
+  const mll = settings.mll ?? 2000;
+  const pt = settings.profitTarget ?? 3000;
+  const acctSize = settings.accountSize ?? 50000;
+
+  // Sort chronologically (oldest first) so the AI can reason about equity curve
+  const sorted = [...trades].sort((a, b) => {
+    const da = new Date(a.date + 'T00:00:00').getTime();
+    const db = new Date(b.date + 'T00:00:00').getTime();
+    if (da !== db) return da - db;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
+  const fmt$ = (n) => {
+    if (n == null || n === 0) return '$0';
+    const sign = n >= 0 ? '+' : '-';
+    return `${sign}$${Math.abs(Math.round(n)).toLocaleString()}`;
+  };
+  const slotName = (slot) => {
+    const acct = accounts.find(a => a.slot === slot);
+    return acct ? acct.name : `Slot ${slot}`;
+  };
+  const cleanText = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+  // Per-account totals
+  const perAccount = accounts.map(a => {
+    const triggered = sorted.flatMap(t => (t.entries || []).filter(e => e.slot === a.slot && e.triggered));
+    const wins = triggered.filter(e => e.result === 'W');
+    const losses = triggered.filter(e => e.result === 'L');
+    const bes = triggered.filter(e => e.result === 'BE');
+    const journalPnl = triggered.reduce((s, e) => s + (e.pnl || 0), 0);
+    const totalPnl = (a.startingPnl || 0) + journalPnl;
+    const decisive = wins.length + losses.length;
+    return {
+      ...a,
+      triggers: triggered.length,
+      wins: wins.length,
+      losses: losses.length,
+      bes: bes.length,
+      wr: decisive > 0 ? wins.length / decisive : null,
+      journalPnl,
+      totalPnl,
+    };
+  });
+
+  const stats = calcStats(trades, 'all');
+  const lift = calcRiskSinkLift(trades);
+
+  const lines = [];
+
+  // ── Header ──
+  lines.push('# Risk Sink Journal — AI Analysis Export');
+  lines.push('');
+  lines.push(`**Generated:** ${new Date().toISOString().slice(0, 10)}`);
+  lines.push(`**Total ideas logged:** ${trades.length}`);
+  if (sorted.length > 0) {
+    lines.push(`**Date range:** ${sorted[0].date} → ${sorted[sorted.length - 1].date}`);
+  }
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  // ── Glossary ──
+  lines.push('## How to read this export');
+  lines.push('');
+  lines.push('This is a **futures-trading journal** for a **risk-sink strategy** spread across 3 prop-firm accounts. The trader logs one *idea* per setup and may enter that idea sequentially — once on each account — so a single losing entry on one account does not mean the idea lost overall.');
+  lines.push('');
+  lines.push('Each idea has up to 3 entries (E1, E2, E3), one per account. Standard pattern: if E1 stops out, the same idea is re-entered on the next account at a refined price (CISD-style precision entries).');
+  lines.push('');
+  lines.push('**Account mapping in this dataset (slot → account):**');
+  if (accounts.length === 0) {
+    lines.push('- *(no accounts configured)*');
+  } else {
+    accounts.forEach(a => {
+      lines.push(`- **E${a.slot}** (slot ${a.slot}) → \`${a.name}\` — health: ${a.health || 'unknown'}, starting PnL: ${fmt$(a.startingPnl || 0)}`);
+    });
+  }
+  lines.push('');
+  lines.push('**R targets per entry (the journal\'s convention):**');
+  lines.push('- E1 → 3R target');
+  lines.push('- E2 → 4R target');
+  lines.push('- E3 → 5R target');
+  lines.push('');
+  lines.push('**Entry results:**');
+  lines.push('- **W** = entry hit its target (PnL is positive, R column is the realized multiple).');
+  lines.push('- **L** = entry stopped out (PnL is negative, ≈ -1R).');
+  lines.push('- **BE** = exited flat / at small profit before target (PnL ≈ $0).');
+  lines.push('');
+  lines.push('**Idea result** is derived from the entries:');
+  lines.push('- **WIN** if any triggered entry won.');
+  lines.push('- **LOSS** if every triggered entry lost.');
+  lines.push('- **BE / incomplete** otherwise.');
+  lines.push('');
+
+  // ── Settings ──
+  lines.push('## Account settings');
+  lines.push('');
+  lines.push(`- **Per-account Max Loss Limit (MLL):** $${mll.toLocaleString()} (trailing)`);
+  lines.push(`- **Per-account profit target:** $${pt.toLocaleString()}`);
+  lines.push(`- **Account size:** $${acctSize.toLocaleString()}`);
+  lines.push(`- **Pooled MLL across all ${accounts.length || 3} accounts:** $${(mll * (accounts.length || 3)).toLocaleString()}`);
+  lines.push(`- **Pooled profit target:** $${(pt * (accounts.length || 3)).toLocaleString()}`);
+  lines.push('');
+
+  // ── Three Styles ──
+  lines.push('## The three risk-sink styles to compare');
+  lines.push('');
+  lines.push('### Style 1 — Equal Division (currently used / "Our Method")');
+  lines.push('Divide the hard stop equally across the 3 accounts. **Same size, same dollar risk per account.**');
+  lines.push('- $200 risk per account, sequential entries');
+  lines.push('- Stopped → immediately enter next account');
+  lines.push('- Best for CISD-precise entries — works fast or not at all');
+  lines.push('');
+  lines.push('> The PnL numbers in the *Trades* section below come from this style — these are the trader\'s actual recorded outcomes.');
+  lines.push('');
+  lines.push('### Style 2 — Building Position (JD\'s Method)');
+  lines.push('Keep $200 risk per account, **increase contract size as you average in**. Same dollar risk, bigger position on later entries because the stop is closer.');
+  lines.push('- Entry 1: 2 contracts → Entry 2: 3 contracts → Entry 3: 5 contracts (illustrative ratios)');
+  lines.push('- Risk per entry stays equal at $200; size grows with each re-entry');
+  lines.push('');
+  lines.push('### Style 3 — Decreasing Risk (Conservative)');
+  lines.push('**Same contract size every entry**, so dollar risk naturally decreases on later entries (closer stop).');
+  lines.push('- Entry 1: $200 risk → Entry 2: $120 risk → Entry 3: $80 risk (illustrative)');
+  lines.push('- Total risk drops from $600 to ~$400');
+  lines.push('- Last account is "almost free" — useful for protecting damaged accounts');
+  lines.push('');
+
+  // ── Trades ──
+  lines.push('---');
+  lines.push('');
+  lines.push('## Trades (chronological, oldest first)');
+  lines.push('');
+  lines.push('Each block is one idea. The table shows whether each account triggered, the actual result, R-multiple realized, and dollar PnL. \"Net R\" / \"Net PnL\" sum across all triggered entries on that idea.');
+  lines.push('');
+
+  if (sorted.length === 0) {
+    lines.push('*(No trades logged yet.)*');
+    lines.push('');
+  } else {
+    sorted.forEach((t, idx) => {
+      const result = getIdeaResult(t);
+      const netR = getNetR(t);
+      const netPnl = getNetPnl(t);
+      const tags = t.tags || {};
+
+      const headerBits = [
+        `#${idx + 1}`,
+        t.date,
+        t.instrument || '?',
+        t.session || '?',
+        t.setup || 'no-setup',
+      ];
+      lines.push(`### ${headerBits.join(' · ')}`);
+      lines.push('');
+
+      const meta = [];
+      if (t.quality) meta.push(`Quality **${t.quality}**`);
+      if (t.emotion) meta.push(`Emotion: ${t.emotion}`);
+      if (result) meta.push(`Idea result: **${result}**`);
+      else meta.push('Idea result: incomplete');
+      meta.push(`Net R: ${netR >= 0 ? '+' : ''}${netR.toFixed(1)}`);
+      meta.push(`Net PnL: ${fmt$(netPnl)}`);
+      lines.push(meta.join(' · '));
+      lines.push('');
+
+      lines.push('| Slot | Account | Triggered | Result | R | PnL |');
+      lines.push('|------|---------|-----------|--------|---|-----|');
+      (t.entries || []).forEach(e => {
+        const tr = e.triggered ? 'yes' : 'no';
+        const rs = e.triggered && e.result ? e.result : '—';
+        const rv = e.triggered && e.result === 'W' && e.r != null ? e.r.toFixed(1)
+                 : e.triggered && e.result === 'L' ? '-1.0'
+                 : e.triggered && e.result === 'BE' ? '0'
+                 : '—';
+        const pv = e.triggered ? fmt$(e.pnl || 0) : '—';
+        lines.push(`| E${e.slot} | ${slotName(e.slot)} | ${tr} | ${rs} | ${rv} | ${pv} |`);
+      });
+      lines.push('');
+
+      if (t.thesis) { lines.push(`**Thesis:** ${cleanText(t.thesis)}`); lines.push(''); }
+      if (t.notes)  { lines.push(`**Notes:** ${cleanText(t.notes)}`);   lines.push(''); }
+      if (t.lesson) { lines.push(`**Lesson:** ${cleanText(t.lesson)}`); lines.push(''); }
+
+      const tagBits = [];
+      if (tags.confirmations?.length) tagBits.push(`Confirmations: ${tags.confirmations.join(', ')}`);
+      if (tags.conditions?.length)    tagBits.push(`Conditions: ${tags.conditions.join(', ')}`);
+      if (tags.mistakes?.length)      tagBits.push(`Mistakes: ${tags.mistakes.join(', ')}`);
+      if (tagBits.length) {
+        lines.push(`*${tagBits.join(' · ')}*`);
+        lines.push('');
+      }
+
+      if (t.screenshot) {
+        lines.push('*(A chart screenshot is attached in-app but not included in this export.)*');
+        lines.push('');
+      }
+    });
+  }
+
+  // ── Per-account totals ──
+  lines.push('---');
+  lines.push('');
+  lines.push('## Per-account totals');
+  lines.push('');
+  lines.push('| Account | Slot | Triggers | W | L | BE | Entry WR | Journal PnL | Total PnL (incl. starting) | Health |');
+  lines.push('|---------|------|----------|---|---|----|----------|-------------|----------------------------|--------|');
+  perAccount.forEach(a => {
+    const wr = a.wr != null ? `${(a.wr * 100).toFixed(0)}%` : '—';
+    lines.push(`| ${a.name} | E${a.slot} | ${a.triggers} | ${a.wins} | ${a.losses} | ${a.bes} | ${wr} | ${fmt$(a.journalPnl)} | ${fmt$(a.totalPnl)} | ${a.health || '—'} |`);
+  });
+  lines.push('');
+
+  // ── Idea-level summary ──
+  lines.push('## Idea-level summary');
+  lines.push('');
+  lines.push(`- **Completed ideas:** ${stats.totalTrades}`);
+  lines.push(`- **Idea wins:** ${stats.ideaWins}`);
+  lines.push(`- **Idea losses:** ${stats.ideaLosses}`);
+  lines.push(`- **Idea win rate:** ${(stats.ideaWR * 100).toFixed(1)}%`);
+  lines.push(`- **Total triggered entries:** ${stats.totalEntries}`);
+  lines.push(`- **Entry win rate:** ${(stats.entryWR * 100).toFixed(1)}%`);
+  lines.push(`- **Total R (Style 1 actual):** ${stats.totalR >= 0 ? '+' : ''}${stats.totalR.toFixed(1)}`);
+  lines.push(`- **Total PnL (Style 1 actual):** ${fmt$(stats.totalPnl)}`);
+  lines.push(`- **Best win streak:** ${stats.bestWinStreak} ideas`);
+  lines.push(`- **Worst loss streak:** ${stats.worstLossStreak} ideas`);
+  if (lift && (lift.actualR !== 0 || lift.baselineR !== 0)) {
+    lines.push(`- **Risk-sink lift vs E1-only baseline:** ${lift.liftR >= 0 ? '+' : ''}${lift.liftR.toFixed(1)}R / ${fmt$(lift.liftPnl)} (rescues: ${lift.rescues})`);
+  }
+  lines.push('');
+
+  if (stats.byEntry?.length) {
+    lines.push('### By entry slot');
+    lines.push('');
+    lines.push('| Entry | Triggers | Wins | Losses | WR | Total R | Total PnL |');
+    lines.push('|-------|----------|------|--------|----|---------|-----------|');
+    stats.byEntry.forEach(e => {
+      const decisive = e.wins + e.losses;
+      const wr = decisive > 0 ? `${((e.wins / decisive) * 100).toFixed(0)}%` : '—';
+      lines.push(`| E${e.slot} | ${e.trades} | ${e.wins} | ${e.losses} | ${wr} | ${e.totalR >= 0 ? '+' : ''}${e.totalR.toFixed(1)} | ${fmt$(e.totalPnl)} |`);
+    });
+    lines.push('');
+  }
+
+  if (stats.bySetup?.length) {
+    lines.push('### By setup');
+    lines.push('');
+    lines.push('| Setup | Ideas | Wins | WR | Total R | Total PnL |');
+    lines.push('|-------|-------|------|----|---------|-----------|');
+    stats.bySetup.forEach(s => {
+      const wr = s.trades > 0 ? `${((s.wins / s.trades) * 100).toFixed(0)}%` : '—';
+      lines.push(`| ${s.setup} | ${s.trades} | ${s.wins} | ${wr} | ${s.totalR >= 0 ? '+' : ''}${s.totalR.toFixed(1)} | ${fmt$(s.pnl)} |`);
+    });
+    lines.push('');
+  }
+
+  if (stats.bySession?.length) {
+    lines.push('### By session');
+    lines.push('');
+    lines.push('| Session | Ideas | WR | Total PnL |');
+    lines.push('|---------|-------|----|-----------|');
+    stats.bySession.forEach(s => {
+      const wr = s.ideas > 0 ? `${(s.wr * 100).toFixed(0)}%` : '—';
+      lines.push(`| ${s.session} | ${s.ideas} | ${wr} | ${fmt$(s.pnl)} |`);
+    });
+    lines.push('');
+  }
+
+  if (stats.byEmotion?.length) {
+    lines.push('### By emotion');
+    lines.push('');
+    lines.push('| Emotion | Ideas | WR | Total PnL |');
+    lines.push('|---------|-------|----|-----------|');
+    stats.byEmotion.forEach(e => {
+      const wr = e.trades > 0 ? `${(e.wr * 100).toFixed(0)}%` : '—';
+      lines.push(`| ${e.emotion} | ${e.trades} | ${wr} | ${fmt$(e.pnl)} |`);
+    });
+    lines.push('');
+  }
+
+  // ── Analysis prompt ──
+  lines.push('---');
+  lines.push('');
+  lines.push('## What I\'d like you to analyze');
+  lines.push('');
+  lines.push('Using the trade-by-trade data above, please **simulate what my outcomes would have been under each of the three styles** and report the differences. The PnL recorded above reflects Style 1 actuals; you\'ll need to derive Styles 2 and 3.');
+  lines.push('');
+  lines.push('1. **Per-style cumulative PnL.** State your assumptions explicitly so I can sanity-check them. A reasonable starting point:');
+  lines.push('   - **Style 1 (Equal Division):** use the actual per-entry PnL recorded.');
+  lines.push('   - **Style 2 (Building Position):** assume contracts scale 2 / 3 / 5 across E1 / E2 / E3 with $200 risk per entry, so a winning entry pays its R-multiple × $200 (same $-per-entry as Style 1), but consider whether the realized R-multiple itself should change because the entry price is closer to target.');
+  lines.push('   - **Style 3 (Decreasing Risk):** same contract size each entry, so dollar risk drops to roughly $200 / $120 / $80 on E1 / E2 / E3. A winning entry pays its R-multiple × that entry\'s dollar risk; a loss is -1× that entry\'s dollar risk.');
+  lines.push('   If any of those assumptions don\'t fit how I actually trade, push back and ask before computing.');
+  lines.push('');
+  lines.push('2. **Equity curve per style** — list or chart the running total by date for each style.');
+  lines.push('');
+  lines.push('3. **Where does each style win or lose?** Look at *rescue* ideas (E1 lost, later entry won) — does Style 2 amplify them meaningfully? Look at *clean* E1 wins — does Style 3 give up too much there?');
+  lines.push('');
+  lines.push('4. **Single-account drawdown safety.** Under each style, what\'s the worst $-drawdown any single account would have seen? Would any style have busted an account given the $2,000 trailing MLL?');
+  lines.push('');
+  lines.push('5. **Recommendation.** Given my actual win rate, where wins tend to land (E1 vs later entries), and the emotion / quality tags on those wins, which style fits my realized behavior best? Be specific about *when* to switch — e.g., "use Style 3 only on damaged accounts" or "Style 2 amplifies your edge but only when E1 lost."');
+  lines.push('');
+  lines.push('Show your math.');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 export function importData(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
