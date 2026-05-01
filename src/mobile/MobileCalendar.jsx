@@ -299,7 +299,7 @@ export default function MobileCalendar({ state, openViewTrade }) {
       )}
 
       {/* Day-of-week header (M–F + weekly column) */}
-      <div className="grid gap-[4px] mb-1" style={{ gridTemplateColumns: 'repeat(5, 1fr) 1.1fr' }}>
+      <div className="grid gap-[3px] mb-1" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
         {DAYS_OF_WEEK.map((d, i) => (
           <div
             key={i}
@@ -318,14 +318,14 @@ export default function MobileCalendar({ state, openViewTrade }) {
       </div>
 
       {/* Grid — one row per week, last column is the weekly total */}
-      <div className="flex flex-col gap-[4px]">
+      <div className="flex flex-col gap-[3px]">
         {weekCells.map((week, wi) => {
           const ws = weeklyStats[wi]
           return (
             <div
               key={wi}
-              className="grid gap-[4px]"
-              style={{ gridTemplateColumns: 'repeat(5, 1fr) 1.1fr' }}
+              className="grid gap-[3px]"
+              style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}
             >
               {week.map((c) => {
                 const hasTrades = c.trades.length > 0
@@ -413,6 +413,8 @@ export default function MobileCalendar({ state, openViewTrade }) {
                   borderColor: 'var(--border)',
                   aspectRatio: '1 / 1.15',
                   padding: '3px 4px 4px',
+                  minWidth: 0,
+                  overflow: 'hidden',
                 }}
               >
                 <div
