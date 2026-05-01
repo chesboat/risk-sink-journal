@@ -15,26 +15,34 @@ const toDateStr = (y, m, d) =>
   `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 
 // Generate calendar grid starting on Sunday
+// Each cell carries its real { year, monthIdx, day } so padding cells from the
+// previous/next month can still resolve to a trade date.
 function buildCalendarGrid(year, month) {
   const firstDay = new Date(year, month, 1)
   const lastDay = new Date(year, month + 1, 0)
   const startDayOfWeek = firstDay.getDay() // Sun=0
   const daysInMonth = lastDay.getDate()
 
+  const prevMonthYear = month === 0 ? year - 1 : year
+  const prevMonthIdx = month === 0 ? 11 : month - 1
+  const prevMonthLast = new Date(year, month, 0).getDate()
+
+  const nextMonthYear = month === 11 ? year + 1 : year
+  const nextMonthIdx = month === 11 ? 0 : month + 1
+
   const days = []
   // Previous month padding
-  const prevMonthLast = new Date(year, month, 0).getDate()
   for (let i = startDayOfWeek - 1; i >= 0; i--) {
-    days.push({ day: prevMonthLast - i, inMonth: false })
+    days.push({ day: prevMonthLast - i, inMonth: false, year: prevMonthYear, monthIdx: prevMonthIdx })
   }
   // Current month
   for (let i = 1; i <= daysInMonth; i++) {
-    days.push({ day: i, inMonth: true })
+    days.push({ day: i, inMonth: true, year, monthIdx: month })
   }
   // Next month padding to fill remaining rows
   const remaining = Math.ceil(days.length / 7) * 7 - days.length
   for (let i = 1; i <= remaining; i++) {
-    days.push({ day: i, inMonth: false })
+    days.push({ day: i, inMonth: false, year: nextMonthYear, monthIdx: nextMonthIdx })
   }
 
   // Split into weeks (rows of 7)
@@ -90,9 +98,11 @@ export default function CalendarPage({ state, openEditTrade }) {
   const weeks = useMemo(() => buildCalendarGrid(year, month), [year, month])
 
   // Get day stats (respects account filter)
+  // Resolves the date from the cell itself, so padding cells (e.g., May 1 shown
+  // in the April grid) still surface their trades — visually faded by the
+  // existing opacity rule in the cell renderer.
   const getDayStats = (dayObj) => {
-    if (!dayObj.inMonth) return null
-    const dateStr = toDateStr(year, month, dayObj.day)
+    const dateStr = toDateStr(dayObj.year, dayObj.monthIdx, dayObj.day)
     const dayTrades = tradesByDate[dateStr]
     if (!dayTrades || dayTrades.length === 0) return null
 
@@ -118,14 +128,16 @@ export default function CalendarPage({ state, openEditTrade }) {
   }
 
   // Weekly totals (respects account filter)
+  // Includes padding cells from adjacent months — if a row contains May 1
+  // shown faded in the April grid, that day's trades still roll into the
+  // weekly column for that row. Monthly totals below stay in-month only.
   const weeklyStats = useMemo(() => {
     return weeks.map((week, wi) => {
       let pnl = 0
       let tradeDays = 0
 
       week.forEach(dayObj => {
-        if (!dayObj.inMonth) return
-        const dateStr = toDateStr(year, month, dayObj.day)
+        const dateStr = toDateStr(dayObj.year, dayObj.monthIdx, dayObj.day)
         const dayTrades = tradesByDate[dateStr]
         if (!dayTrades || dayTrades.length === 0) return
         const matching = dayTrades.filter(tradeMatchesFilter)
@@ -172,9 +184,10 @@ export default function CalendarPage({ state, openEditTrade }) {
   }
 
   const isToday = (dayObj) => {
-    if (!dayObj.inMonth) return false
     const today = new Date()
-    return dayObj.day === today.getDate() && month === today.getMonth() && year === today.getFullYear()
+    return dayObj.day === today.getDate() &&
+      dayObj.monthIdx === today.getMonth() &&
+      dayObj.year === today.getFullYear()
   }
 
   // Selected day trades
@@ -281,7 +294,7 @@ export default function CalendarPage({ state, openEditTrade }) {
                 const stats = getDayStats(dayObj)
                 const today = isToday(dayObj)
                 const hasTrades = !!stats
-                const dateStr = dayObj.inMonth ? toDateStr(year, month, dayObj.day) : null
+                const dateStr = toDateStr(dayObj.year, dayObj.monthIdx, dayObj.day)
 
                 return (
                   <div
