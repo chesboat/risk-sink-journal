@@ -1,17 +1,64 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { getCalendarDays, getIdeaResult, getNetPnl, getNetR, formatCurrency } from '../lib/store'
+import { getIdeaResult, getNetPnl, getNetR, formatCurrency } from '../lib/store'
 
 // ═══════════════════════════════════════════════════
-// MOBILE CALENDAR — Compact month grid tuned for phones
-//   • 7×6 grid with uniform square-ish tiles (~44–52px wide)
-//   • Each tile: day number top-left · tiny ±P&L (k-scaled) · 3 entry dots
+// MOBILE CALENDAR — Weekday-only grid tuned for phones
+//   • 5 day cols (M–F) + 1 weekly-total col
+//   • Each day tile: day number top-left · tiny ±P&L (k-scaled) · entry dots
+//   • Padding cells from adjacent months (e.g. May 1 in the April grid) are
+//     shown faded, and roll into the weekly column for that row — same
+//     behavior as the desktop calendar.
 //   • Background tint: green for +day, red for −day
 //   • Tap tile → bottom sheet with that day's trades
 // ═══════════════════════════════════════════════════
 
-const DAYS_OF_WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+const DAYS_OF_WEEK = ['M', 'T', 'W', 'T', 'F']
+
+// Local date string helper (avoids UTC shift from toISOString)
+const toDateStr = (y, m, d) =>
+  `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+
+// Build a Mon-first grid of weeks. Each cell carries its real
+// { year, monthIdx, day }, including padding cells from adjacent months.
+// Only Mon–Fri are returned per row; Sat/Sun are dropped.
+function buildMobileGrid(year, month) {
+  const firstDay = new Date(year, month, 1)
+  const lastDay = new Date(year, month + 1, 0)
+  const startDayOfWeek = (firstDay.getDay() + 6) % 7 // Mon=0
+  const daysInMonth = lastDay.getDate()
+
+  const prevMonthYear = month === 0 ? year - 1 : year
+  const prevMonthIdx = month === 0 ? 11 : month - 1
+  const prevMonthLast = new Date(year, month, 0).getDate()
+
+  const nextMonthYear = month === 11 ? year + 1 : year
+  const nextMonthIdx = month === 11 ? 0 : month + 1
+
+  const days = []
+  for (let i = startDayOfWeek - 1; i >= 0; i--) {
+    days.push({ day: prevMonthLast - i, inMonth: false, year: prevMonthYear, monthIdx: prevMonthIdx })
+  }
+  for (let i = 1; i <= daysInMonth; i++) {
+    days.push({ day: i, inMonth: true, year, monthIdx: month })
+  }
+  const remaining = Math.ceil(days.length / 7) * 7 - days.length
+  for (let i = 1; i <= remaining; i++) {
+    days.push({ day: i, inMonth: false, year: nextMonthYear, monthIdx: nextMonthIdx })
+  }
+
+  // Group into Mon-first weeks of 7, drop Sat/Sun (last 2 cells per week).
+  // Skip any week whose visible Mon–Fri cells contain zero in-month days
+  // (happens for months that start on Sat/Sun — without this, the first row
+  // would be entirely faded prev-month days, which is just visual noise).
+  const weeks = []
+  for (let i = 0; i < days.length; i += 7) {
+    const weekdays = days.slice(i, i + 5)
+    if (weekdays.some((d) => d.inMonth)) weeks.push(weekdays)
+  }
+  return weeks
+}
 
 // Abbreviate P&L for tight mobile tiles: +1.2k / -250 / +80
 function tinyPnl(n) {
@@ -93,59 +140,70 @@ export default function MobileCalendar({ state, openViewTrade }) {
     return map
   }, [state.trades])
 
-  // Build day cells
-  const days = useMemo(() => getCalendarDays(year, month), [year, month])
+  // Build weeks of weekday cells (each cell carries its own date)
+  const weeks = useMemo(() => buildMobileGrid(year, month), [year, month])
 
-  const cells = days.map((d, i) => {
-    // Figure out actual date for this cell
-    let date
-    if (d.inMonth) {
-      date = new Date(year, month, d.day)
-    } else if (i < 7) {
-      // Previous month
-      date = new Date(year, month - 1, d.day)
-    } else {
-      // Next month
-      date = new Date(year, month + 1, d.day)
-    }
-    const dateStr = date.toISOString().slice(0, 10)
-    const allTrades = tradesByDate[dateStr] || []
-    const trades = allTrades.filter(tradeMatchesFilter)
-    const pnl = trades.reduce((s, t) => s + filteredPnl(t), 0)
-    // Merge entries across trades — show status of E1/E2/E3 for the day as a whole
-    // When filtered to a single account, only show that slot's dot
-    const slotsToShow = accountFilter != null ? [accountFilter] : [1, 2, 3]
-    const dayEntries = slotsToShow.map((slot) => {
-      for (const t of allTrades) {
-        const e = (t.entries || []).find((en) => en.slot === slot && en.triggered)
-        if (e) return e
-      }
-      return { slot, triggered: false }
+  const todayStr = useMemo(() => {
+    const t = new Date()
+    return toDateStr(t.getFullYear(), t.getMonth(), t.getDate())
+  }, [])
+
+  // Hydrate each cell with its trades, PnL, dots, and today flag.
+  // Padding cells (from prev/next month) are included so faded tiles still
+  // show their PnL and roll into weekly totals.
+  const weekCells = useMemo(() => {
+    return weeks.map((week) =>
+      week.map((d, i) => {
+        const dateStr = toDateStr(d.year, d.monthIdx, d.day)
+        const allTrades = tradesByDate[dateStr] || []
+        const trades = allTrades.filter(tradeMatchesFilter)
+        const pnl = trades.reduce((s, t) => s + filteredPnl(t), 0)
+
+        const slotsToShow = accountFilter != null ? [accountFilter] : [1, 2, 3]
+        const dayEntries = slotsToShow.map((slot) => {
+          for (const t of allTrades) {
+            const e = (t.entries || []).find((en) => en.slot === slot && en.triggered)
+            if (e) return e
+          }
+          return { slot, triggered: false }
+        })
+
+        return {
+          key: `${dateStr}-${i}`,
+          dateStr,
+          day: d.day,
+          inMonth: d.inMonth,
+          trades,
+          pnl,
+          dayEntries,
+          isToday: dateStr === todayStr,
+        }
+      })
+    )
+  }, [weeks, tradesByDate, accountFilter, todayStr])
+
+  // Weekly totals — include padding-day trades, mirrors desktop calendar.
+  const weeklyStats = useMemo(() => {
+    return weekCells.map((week, wi) => {
+      let pnl = 0
+      let tradeDays = 0
+      week.forEach((c) => {
+        if (c.trades.length === 0) return
+        tradeDays++
+        pnl += c.pnl
+      })
+      return { pnl, tradeDays, weekNum: wi + 1 }
     })
+  }, [weekCells])
 
-    const today = new Date().toISOString().slice(0, 10)
-    const isToday = dateStr === today
-
-    return {
-      key: `${dateStr}-${i}`,
-      dateStr,
-      day: d.day,
-      inMonth: d.inMonth,
-      trades,
-      pnl,
-      dayEntries,
-      isToday,
-    }
-  })
-
-  // Month totals (respects account filter)
+  // Month totals — in-month days only, so the top "Net P&L" stays April-only.
   const monthStats = useMemo(() => {
-    const inMonthCells = cells.filter((c) => c.inMonth)
     let pnl = 0
     let trades = 0
     let wins = 0
     let losses = 0
-    inMonthCells.forEach((c) => {
+    weekCells.flat().forEach((c) => {
+      if (!c.inMonth) return
       pnl += c.pnl
       trades += c.trades.length
       c.trades.forEach((t) => {
@@ -155,9 +213,10 @@ export default function MobileCalendar({ state, openViewTrade }) {
       })
     })
     return { pnl, trades, wins, losses }
-  }, [cells, accountFilter])
+  }, [weekCells])
 
-  const selectedCell = selectedDate ? cells.find((c) => c.dateStr === selectedDate) : null
+  const allCells = useMemo(() => weekCells.flat(), [weekCells])
+  const selectedCell = selectedDate ? allCells.find((c) => c.dateStr === selectedDate) : null
 
   return (
     <div className="px-4 pt-4 pb-28">
@@ -239,8 +298,8 @@ export default function MobileCalendar({ state, openViewTrade }) {
         </div>
       )}
 
-      {/* Day-of-week header */}
-      <div className="grid grid-cols-7 gap-[4px] mb-1">
+      {/* Day-of-week header (M–F + weekly column) */}
+      <div className="grid gap-[4px] mb-1" style={{ gridTemplateColumns: 'repeat(5, 1fr) 1.1fr' }}>
         {DAYS_OF_WEEK.map((d, i) => (
           <div
             key={i}
@@ -250,85 +309,138 @@ export default function MobileCalendar({ state, openViewTrade }) {
             {d}
           </div>
         ))}
+        <div
+          className="text-center text-[10px] font-semibold uppercase"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          WK
+        </div>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-7 gap-[4px]">
-        {cells.map((c) => {
-          const hasTrades = c.trades.length > 0
-          const isWin = c.pnl > 0
-          const isLoss = c.pnl < 0
-          const isSelected = selectedDate === c.dateStr
-
-          // Tile background tint
-          let bg = 'var(--card)'
-          let borderColor = 'var(--border)'
-          if (isWin) {
-            bg = 'color-mix(in srgb, var(--green) 14%, var(--card))'
-            borderColor = 'color-mix(in srgb, var(--green) 30%, var(--border))'
-          } else if (isLoss) {
-            bg = 'color-mix(in srgb, var(--red) 14%, var(--card))'
-            borderColor = 'color-mix(in srgb, var(--red) 30%, var(--border))'
-          }
-          if (c.isToday) {
-            borderColor = 'var(--blue)'
-          }
-          if (isSelected) {
-            borderColor = 'var(--text)'
-          }
-
+      {/* Grid — one row per week, last column is the weekly total */}
+      <div className="flex flex-col gap-[4px]">
+        {weekCells.map((week, wi) => {
+          const ws = weeklyStats[wi]
           return (
-            <button
-              key={c.key}
-              onClick={() => setSelectedDate(c.dateStr)}
-              disabled={!hasTrades && !c.inMonth}
-              className="rounded-lg cursor-pointer transition-all border active:scale-95"
-              style={{
-                background: bg,
-                borderColor,
-                borderWidth: c.isToday || isSelected ? 1.5 : 1,
-                aspectRatio: '1 / 1.15',
-                padding: '3px 3px 4px',
-                opacity: c.inMonth ? 1 : 0.35,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                alignItems: 'stretch',
-              }}
+            <div
+              key={wi}
+              className="grid gap-[4px]"
+              style={{ gridTemplateColumns: 'repeat(5, 1fr) 1.1fr' }}
             >
-              {/* Day number */}
-              <div
-                className="text-[10px] font-bold text-left leading-none"
-                style={{
-                  color: c.isToday
-                    ? 'var(--blue)'
-                    : c.inMonth
-                    ? 'var(--text)'
-                    : 'var(--text-muted)',
-                }}
-              >
-                {c.day}
-              </div>
+              {week.map((c) => {
+                const hasTrades = c.trades.length > 0
+                const isWin = c.pnl > 0
+                const isLoss = c.pnl < 0
+                const isSelected = selectedDate === c.dateStr
 
-              {/* P&L + dots */}
-              {hasTrades && (
-                <div className="flex flex-col items-center gap-[2px]">
-                  <div
-                    className="text-[9px] font-bold font-mono leading-none"
+                // Tile background tint
+                let bg = 'var(--card)'
+                let borderColor = 'var(--border)'
+                if (isWin) {
+                  bg = 'color-mix(in srgb, var(--green) 14%, var(--card))'
+                  borderColor = 'color-mix(in srgb, var(--green) 30%, var(--border))'
+                } else if (isLoss) {
+                  bg = 'color-mix(in srgb, var(--red) 14%, var(--card))'
+                  borderColor = 'color-mix(in srgb, var(--red) 30%, var(--border))'
+                }
+                if (c.isToday) {
+                  borderColor = 'var(--blue)'
+                }
+                if (isSelected) {
+                  borderColor = 'var(--text)'
+                }
+
+                return (
+                  <button
+                    key={c.key}
+                    onClick={() => setSelectedDate(c.dateStr)}
+                    disabled={!hasTrades && !c.inMonth}
+                    className="rounded-lg cursor-pointer transition-all border active:scale-95"
                     style={{
-                      color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)',
+                      background: bg,
+                      borderColor,
+                      borderWidth: c.isToday || isSelected ? 1.5 : 1,
+                      aspectRatio: '1 / 1.15',
+                      padding: '3px 3px 4px',
+                      opacity: c.inMonth ? 1 : 0.35,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      alignItems: 'stretch',
                     }}
                   >
-                    {tinyPnl(c.pnl)}
-                  </div>
-                  <div className="flex gap-[2px]">
-                    {c.dayEntries.map((e, j) => (
-                      <TinyDot key={j} entry={e} />
-                    ))}
-                  </div>
+                    {/* Day number */}
+                    <div
+                      className="text-[10px] font-bold text-left leading-none"
+                      style={{
+                        color: c.isToday
+                          ? 'var(--blue)'
+                          : c.inMonth
+                          ? 'var(--text)'
+                          : 'var(--text-muted)',
+                      }}
+                    >
+                      {c.day}
+                    </div>
+
+                    {/* P&L + dots */}
+                    {hasTrades && (
+                      <div className="flex flex-col items-center gap-[2px]">
+                        <div
+                          className="text-[9px] font-bold font-mono leading-none"
+                          style={{
+                            color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)',
+                          }}
+                        >
+                          {tinyPnl(c.pnl)}
+                        </div>
+                        <div className="flex gap-[2px]">
+                          {c.dayEntries.map((e, j) => (
+                            <TinyDot key={j} entry={e} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+
+              {/* Weekly total cell */}
+              <div
+                className="rounded-lg border flex flex-col justify-center items-center"
+                style={{
+                  background: 'var(--surface)',
+                  borderColor: 'var(--border)',
+                  aspectRatio: '1 / 1.15',
+                  padding: '3px 4px 4px',
+                }}
+              >
+                <div
+                  className="text-[8px] font-semibold uppercase tracking-wider leading-none mb-0.5"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  W{ws.weekNum}
                 </div>
-              )}
-            </button>
+                <div
+                  className="text-[10px] font-bold font-mono leading-tight"
+                  style={{
+                    color:
+                      ws.pnl > 0
+                        ? 'var(--green)'
+                        : ws.pnl < 0
+                        ? 'var(--red)'
+                        : 'var(--text-muted)',
+                  }}
+                >
+                  {ws.tradeDays === 0 ? '—' : ws.pnl === 0 ? '$0' : tinyPnl(ws.pnl)}
+                </div>
+                {ws.tradeDays > 0 && (
+                  <div className="text-[8px] font-medium leading-none mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {ws.tradeDays}d
+                  </div>
+                )}
+              </div>
+            </div>
           )
         })}
       </div>
