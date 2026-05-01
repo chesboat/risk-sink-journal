@@ -8,7 +8,7 @@ import {
 import {
   getIdeaResult, getNetR, getNetPnl, formatPnl, formatDate,
   ENTRY_LABELS, ENTRY_COLORS,
-  CONFIRMATIONS, CONDITIONS, MISTAKES,
+  TAG_CATEGORIES,
 } from '../lib/store'
 
 // ── Screenshot Viewer ──
@@ -131,8 +131,8 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
   const netPnl = getNetPnl(trade)
   const entries = trade.entries || []
   const triggeredEntries = entries.filter(e => e.triggered && e.result)
-  const tags = trade.tags || { mistakes: [], conditions: [], confirmations: [] }
-  const hasTags = (tags.confirmations?.length || 0) + (tags.conditions?.length || 0) + (tags.mistakes?.length || 0) > 0
+  const tags = trade.tags || { mistakes: [], conditions: [], confirmations: [], riskSinkStyles: [] }
+  const hasTags = TAG_CATEGORIES.some(c => (tags[c.key]?.length || 0) > 0)
   const hasJournal = trade.thesis || trade.notes || trade.lesson
 
   return (
@@ -315,30 +315,16 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
             </h3>
             {hasTags ? (
               <div className="space-y-3">
-                {tags.confirmations?.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--green)', opacity: 0.7 }}>Confirmations</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tags.confirmations.map(t => <TagPill key={t} label={t} color="var(--green)" />)}
+                {TAG_CATEGORIES.map(cat => (
+                  (tags[cat.key]?.length > 0) && (
+                    <div key={cat.key}>
+                      <p className="text-[10px] font-semibold mb-1.5" style={{ color: cat.color, opacity: 0.7 }}>{cat.label}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tags[cat.key].map(t => <TagPill key={t} label={t} color={cat.color} />)}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {tags.conditions?.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--blue)', opacity: 0.7 }}>Market Conditions</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tags.conditions.map(t => <TagPill key={t} label={t} color="var(--blue)" />)}
-                    </div>
-                  </div>
-                )}
-                {tags.mistakes?.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold mb-1.5" style={{ color: 'var(--red)', opacity: 0.7 }}>Mistakes</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {tags.mistakes.map(t => <TagPill key={t} label={t} color="var(--red)" />)}
-                    </div>
-                  </div>
-                )}
+                  )
+                ))}
               </div>
             ) : (
               <p className="text-xs italic" style={{ color: 'var(--text-dim)', opacity: 0.3 }}>No tags — edit this trade to add tags</p>

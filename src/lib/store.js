@@ -14,6 +14,16 @@ export const HEALTH_STATUSES = ['Eval', 'Funded', 'Near Payout', 'Damaged', 'Cri
 export const MISTAKES = ['Moved Stop', 'Early Entry', 'Late Entry', 'Oversized', 'FOMO Entry', 'No Plan', 'Chased', 'Revenge Trade', 'Wrong Session', 'Ignored Levels'];
 export const CONDITIONS = ['Trending', 'Ranging', 'Choppy', 'News Event', 'Low Volume', 'High Volume', 'Volatile', 'Pre-Market', 'Gap Up', 'Gap Down'];
 export const CONFIRMATIONS = ['BOS', 'CISD', 'FVG Fill', 'Order Block', 'Liquidity Sweep', 'EQ Level', 'Divergence', 'Volume Spike', 'Displacement', 'Inducement'];
+// Risk Sink Style — matches the three-style framework used in the AI export
+// (Style 1 = Equal Division, Style 2 = Building Position, Style 3 = Decreasing Risk)
+export const RISK_SINK_STYLES = ['Style 1', 'Style 2', 'Style 3'];
+
+export const TAG_CATEGORIES = [
+  { key: 'confirmations', label: 'Confirmations',     options: CONFIRMATIONS,     color: 'var(--green)'  },
+  { key: 'conditions',    label: 'Market Conditions', options: CONDITIONS,        color: 'var(--blue)'   },
+  { key: 'riskSinkStyles',label: 'Risk Sink Style',   options: RISK_SINK_STYLES,  color: 'var(--purple)' },
+  { key: 'mistakes',      label: 'Mistakes',          options: MISTAKES,          color: 'var(--red)'    },
+];
 
 export const ENTRY_COLORS = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' };
 export const ENTRY_LABELS = { 1: 'E1 · 3R', 2: 'E2 · 4R', 3: 'E3 · 5R' };
@@ -33,6 +43,13 @@ export function getDefaultState() {
       mll: 2000,
       profitTarget: 3000,
       accountSize: 50000,
+      // User-added tags persist here so they reappear on the next trade
+      customTags: {
+        confirmations: [],
+        conditions: [],
+        riskSinkStyles: [],
+        mistakes: [],
+      },
     },
   };
 }
@@ -259,9 +276,10 @@ export function buildAIMarkdown(state) {
       if (t.lesson) { lines.push(`**Lesson:** ${cleanText(t.lesson)}`); lines.push(''); }
 
       const tagBits = [];
-      if (tags.confirmations?.length) tagBits.push(`Confirmations: ${tags.confirmations.join(', ')}`);
-      if (tags.conditions?.length)    tagBits.push(`Conditions: ${tags.conditions.join(', ')}`);
-      if (tags.mistakes?.length)      tagBits.push(`Mistakes: ${tags.mistakes.join(', ')}`);
+      if (tags.confirmations?.length)  tagBits.push(`Confirmations: ${tags.confirmations.join(', ')}`);
+      if (tags.conditions?.length)     tagBits.push(`Conditions: ${tags.conditions.join(', ')}`);
+      if (tags.riskSinkStyles?.length) tagBits.push(`Risk Sink Style: ${tags.riskSinkStyles.join(', ')}`);
+      if (tags.mistakes?.length)       tagBits.push(`Mistakes: ${tags.mistakes.join(', ')}`);
       if (tagBits.length) {
         lines.push(`*${tagBits.join(' · ')}*`);
         lines.push('');
@@ -417,6 +435,7 @@ export function createTrade(overrides = {}) {
       mistakes: [],
       conditions: [],
       confirmations: [],
+      riskSinkStyles: [],
     },
     screenshot: null,
     createdAt: Date.now(),

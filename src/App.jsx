@@ -259,6 +259,19 @@ export default function App() {
     updateSettings({ theme: state.settings.theme === 'dark' ? 'light' : 'dark' })
   }
 
+  // Persist a user-added custom tag so it reappears on the next trade.
+  // No-op if the tag already exists in this category.
+  const addCustomTag = useCallback((category, tag) => {
+    const trimmed = (tag || '').trim()
+    if (!trimmed) return
+    const current = state.settings.customTags || {}
+    const list = current[category] || []
+    if (list.includes(trimmed)) return
+    updateSettings({
+      customTags: { ...current, [category]: [...list, trimmed] }
+    })
+  }, [state.settings.customTags, updateSettings])
+
   const openNewTrade = () => {
     setEditTrade(null)
     setShowModal(true)
@@ -318,7 +331,7 @@ export default function App() {
       )
     }
 
-    const props = { state, openEditTrade: openViewTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
+    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />
@@ -397,6 +410,8 @@ export default function App() {
               trade={editTrade}
               onSave={editTrade ? updateTrade : addTrade}
               onClose={() => { setShowModal(false); setEditTrade(null) }}
+              customTags={state.settings.customTags || {}}
+              onAddCustomTag={addCustomTag}
             />
           )}
         </AnimatePresence>

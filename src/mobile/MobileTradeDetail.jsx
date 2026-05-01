@@ -294,6 +294,7 @@ export default function MobileTradeDetail({ trade, onBack, onEdit, onDelete }) {
         {/* Tags */}
         {(trade.tags?.confirmations?.length ||
           trade.tags?.conditions?.length ||
+          trade.tags?.riskSinkStyles?.length ||
           trade.tags?.mistakes?.length) ? (
           <div
             className="rounded-2xl p-3 mt-2 border"
@@ -301,6 +302,7 @@ export default function MobileTradeDetail({ trade, onBack, onEdit, onDelete }) {
           >
             <TagRow label="Confirmations" tags={trade.tags?.confirmations} color="var(--green)" />
             <TagRow label="Conditions" tags={trade.tags?.conditions} color="var(--blue)" />
+            <TagRow label="Risk Sink Style" tags={trade.tags?.riskSinkStyles} color="var(--purple)" />
             <TagRow label="Mistakes" tags={trade.tags?.mistakes} color="var(--red)" />
           </div>
         ) : null}

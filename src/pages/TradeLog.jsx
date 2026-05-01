@@ -8,6 +8,9 @@ import {
   ChevronDown,
   Image,
   FileText,
+  Tag,
+  X,
+  Check,
 } from 'lucide-react';
 import {
   getIdeaResult,
@@ -19,14 +22,17 @@ import {
   SESSIONS,
   SETUPS,
   INSTRUMENTS,
+  TAG_CATEGORIES,
 } from '../lib/store';
 
 export default function TradeLog({
   state,
   openEditTrade,
+  updateTrade,
   deleteTrade,
 }) {
   const { trades, accounts, settings } = state;
+  const customTags = settings?.customTags || {};
 
   // State
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,6 +47,54 @@ export default function TradeLog({
   const [sortDirection, setSortDirection] = useState('desc');
   const [dismissedFlags, setDismissedFlags] = useState(false);
   const [lightboxImage, setLightboxImage] = useState(null);
+
+  // Bulk-select state
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
+  const [stagedTags, setStagedTags] = useState({}); // { confirmations:[], conditions:[], riskSinkStyles:[], mistakes:[] }
+
+  const toggleSelected = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelected = () => setSelectedIds(new Set());
+  const toggleStagedTag = (category, tag) => {
+    setStagedTags(prev => {
+      const list = prev[category] || [];
+      return {
+        ...prev,
+        [category]: list.includes(tag) ? list.filter(t => t !== tag) : [...list, tag],
+      };
+    });
+  };
+  const stagedCount = Object.values(stagedTags).reduce((s, l) => s + (l?.length || 0), 0);
+
+  // Apply staged tags to all selected trades, merging with existing tags
+  const applyBulkTags = () => {
+    if (stagedCount === 0 || selectedIds.size === 0) {
+      setBulkPickerOpen(false);
+      return;
+    }
+    const ids = new Set(selectedIds);
+    trades.forEach(trade => {
+      if (!ids.has(trade.id)) return;
+      const existing = trade.tags || {};
+      const merged = { ...existing };
+      TAG_CATEGORIES.forEach(cat => {
+        const add = stagedTags[cat.key] || [];
+        if (!add.length) return;
+        const cur = existing[cat.key] || [];
+        merged[cat.key] = Array.from(new Set([...cur, ...add]));
+      });
+      updateTrade?.({ ...trade, tags: merged });
+    });
+    setStagedTags({});
+    setBulkPickerOpen(false);
+    clearSelected();
+  };
 
   // Get behavioral flags
   const behavioralFlags = useMemo(() => {
@@ -302,7 +356,42 @@ export default function TradeLog({
 
       {/* Header */}
       <div className="px-6 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-        <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--text)' }}>Trade Log</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Trade Log</h1>
+
+          {/* Bulk-action toolbar — appears when one or more trades are selected */}
+          <AnimatePresence>
+            {selectedIds.size > 0 && (
+              <motion.div
+                initial={{ opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 8 }}
+                transition={{ duration: 0.15 }}
+                className="flex items-center gap-2"
+              >
+                <span className="text-sm font-semibold" style={{ color: 'var(--text-dim)' }}>
+                  {selectedIds.size} selected
+                </span>
+                <button
+                  onClick={() => setBulkPickerOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold cursor-pointer border-0 transition-colors"
+                  style={{ background: 'var(--accent)', color: '#fff' }}
+                >
+                  <Tag className="w-4 h-4" />
+                  Add tags
+                </button>
+                <button
+                  onClick={clearSelected}
+                  className="p-1.5 rounded-lg cursor-pointer border-0 transition-colors"
+                  style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+                  title="Clear selection"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
         <div className="flex gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -506,6 +595,39 @@ export default function TradeLog({
           <table className="w-full border-collapse">
             <thead className="sticky top-0" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
               <tr>
+                {/* Master select cell */}
+                <th className="w-10 px-3 py-3 text-left">
+                  {(() => {
+                    const visibleIds = filteredAndSortedTrades.map(t => t.id);
+                    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+                    const someSelected = visibleIds.some(id => selectedIds.has(id));
+                    return (
+                      <input
+                        type="checkbox"
+                        aria-label="Select all"
+                        checked={allSelected}
+                        ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
+                        onChange={() => {
+                          if (allSelected) {
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              visibleIds.forEach(id => next.delete(id));
+                              return next;
+                            });
+                          } else {
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              visibleIds.forEach(id => next.add(id));
+                              return next;
+                            });
+                          }
+                        }}
+                        className="cursor-pointer"
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                    );
+                  })()}
+                </th>
                 {[
                   { key: 'date', label: 'Date' },
                   { key: 'instrument', label: 'Instrument' },
@@ -537,18 +659,35 @@ export default function TradeLog({
               </tr>
             </thead>
             <tbody>
-              {filteredAndSortedTrades.map((trade, idx) => (
+              {filteredAndSortedTrades.map((trade, idx) => {
+                const isSelected = selectedIds.has(trade.id);
+                return (
                 <motion.tr
                   key={trade.id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: idx * 0.02 }}
                   className="group transition-colors"
-                  style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                  style={{
+                    borderBottom: '1px solid var(--border)',
+                    cursor: 'pointer',
+                    background: isSelected ? 'var(--blue-dim)' : 'transparent',
+                  }}
                   onClick={() => openEditTrade(trade)}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--surface)' }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
                 >
+                  {/* Per-row checkbox */}
+                  <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelected(trade.id)}
+                      aria-label={`Select trade ${formatDate(trade.date)}`}
+                      className="cursor-pointer"
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                  </td>
                   <td className="px-4 py-3 text-sm" style={{ color: 'var(--text)' }}>
                     <div className="flex items-center gap-1.5">
                       {formatDate(trade.date)}
@@ -568,24 +707,32 @@ export default function TradeLog({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1 flex-wrap max-w-[180px]">
-                      {[...(trade.tags?.confirmations || []), ...(trade.tags?.conditions || []), ...(trade.tags?.mistakes || [])].slice(0, 3).map((tag, ti) => {
-                        const isMistake = (trade.tags?.mistakes || []).includes(tag);
-                        const isConfirm = (trade.tags?.confirmations || []).includes(tag);
-                        return (
-                          <span key={ti} className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                            style={{
-                              background: isMistake ? 'var(--red-dim)' : isConfirm ? 'var(--green-dim)' : 'var(--blue-dim)',
-                              color: isMistake ? 'var(--red)' : isConfirm ? 'var(--green)' : 'var(--accent)',
-                            }}>
-                            {tag}
-                          </span>
+                      {(() => {
+                        // Flatten tags-by-category, preserve which color each one belongs to
+                        const flat = TAG_CATEGORIES.flatMap(cat =>
+                          (trade.tags?.[cat.key] || []).map(t => ({ tag: t, color: cat.color }))
                         );
-                      })}
-                      {((trade.tags?.confirmations?.length || 0) + (trade.tags?.conditions?.length || 0) + (trade.tags?.mistakes?.length || 0)) > 3 && (
-                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                          +{((trade.tags?.confirmations?.length || 0) + (trade.tags?.conditions?.length || 0) + (trade.tags?.mistakes?.length || 0)) - 3}
-                        </span>
-                      )}
+                        const visible = flat.slice(0, 3);
+                        const overflow = flat.length - visible.length;
+                        return (
+                          <>
+                            {visible.map(({ tag, color }, ti) => (
+                              <span
+                                key={ti}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                            {overflow > 0 && (
+                              <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                                +{overflow}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -622,11 +769,119 @@ export default function TradeLog({
                     </div>
                   </td>
                 </motion.tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* Bulk Tag Picker */}
+      <AnimatePresence>
+        {bulkPickerOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setBulkPickerOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-2xl w-full max-w-lg overflow-hidden"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>Add tags</h2>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Tags will be appended to {selectedIds.size} selected trade{selectedIds.size === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setBulkPickerOpen(false)}
+                  className="p-1.5 rounded-lg cursor-pointer border-0"
+                  style={{ background: 'transparent', color: 'var(--text-dim)' }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Categories */}
+              <div className="px-5 py-4 max-h-[60vh] overflow-y-auto space-y-4">
+                {TAG_CATEGORIES.map(cat => {
+                  const all = [
+                    ...cat.options,
+                    ...((customTags?.[cat.key] || []).filter(t => !cat.options.includes(t))),
+                  ];
+                  const sel = stagedTags[cat.key] || [];
+                  return (
+                    <div key={cat.key}>
+                      <div className="text-[11px] font-semibold mb-2 uppercase tracking-wide" style={{ color: cat.color, opacity: 0.85 }}>
+                        {cat.label}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {all.map(tag => {
+                          const isOn = sel.includes(tag);
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => toggleStagedTag(cat.key, tag)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer border-0 transition-all"
+                              style={{
+                                background: isOn ? cat.color : 'var(--surface)',
+                                color: isOn ? '#fff' : 'var(--text-dim)',
+                                border: isOn ? 'none' : '1px solid var(--border)',
+                              }}
+                            >
+                              {tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between gap-3 px-5 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {stagedCount} tag{stagedCount === 1 ? '' : 's'} staged
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setStagedTags({}); setBulkPickerOpen(false); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border-0"
+                    style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={applyBulkTags}
+                    disabled={stagedCount === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border-0 transition-opacity"
+                    style={{
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      opacity: stagedCount === 0 ? 0.4 : 1,
+                    }}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Screenshot Lightbox */}
       <AnimatePresence>

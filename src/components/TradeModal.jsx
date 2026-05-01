@@ -9,9 +9,7 @@ import {
   EMOTIONS,
   QUALITIES,
   ENTRY_LABELS,
-  MISTAKES,
-  CONDITIONS,
-  CONFIRMATIONS,
+  TAG_CATEGORIES,
 } from '../lib/store'
 
 // ═══════════════════════════════════════════════════
@@ -290,10 +288,11 @@ function TagSection({ label, options, selected, onToggle, color, customTags, onA
 // MAIN TRADE MODAL
 // ═══════════════════════════════════════════════════
 
-export default function TradeModal({ trade, onSave, onClose }) {
+export default function TradeModal({ trade, onSave, onClose, customTags = {}, onAddCustomTag }) {
   const initTrade = trade || createTrade()
-  // Ensure tags structure exists for older trades
-  if (!initTrade.tags) initTrade.tags = { mistakes: [], conditions: [], confirmations: [] }
+  // Ensure tags structure exists for older trades (riskSinkStyles added in v2)
+  if (!initTrade.tags) initTrade.tags = { mistakes: [], conditions: [], confirmations: [], riskSinkStyles: [] }
+  if (!initTrade.tags.riskSinkStyles) initTrade.tags.riskSinkStyles = []
   if (!initTrade.notes) initTrade.notes = ''
 
   const [form, setForm] = useState(initTrade)
@@ -334,8 +333,8 @@ export default function TradeModal({ trade, onSave, onClose }) {
     { id: 'tags', label: 'Tags' },
   ]
 
-  // Count filled tags for badge
-  const tagCount = (form.tags?.mistakes?.length || 0) + (form.tags?.conditions?.length || 0) + (form.tags?.confirmations?.length || 0)
+  // Count filled tags for badge (across all categories)
+  const tagCount = TAG_CATEGORIES.reduce((sum, c) => sum + (form.tags?.[c.key]?.length || 0), 0)
 
   return (
     <motion.div
@@ -557,29 +556,18 @@ export default function TradeModal({ trade, onSave, onClose }) {
                   Tag your trades for powerful filtering and pattern recognition. Select multiple per category.
                 </p>
 
-                <TagSection
-                  label="Confirmations"
-                  options={CONFIRMATIONS}
-                  selected={form.tags?.confirmations || []}
-                  onToggle={(tag) => toggleTag('confirmations', tag)}
-                  color="var(--green)"
-                />
-
-                <TagSection
-                  label="Market Conditions"
-                  options={CONDITIONS}
-                  selected={form.tags?.conditions || []}
-                  onToggle={(tag) => toggleTag('conditions', tag)}
-                  color="var(--blue)"
-                />
-
-                <TagSection
-                  label="Mistakes"
-                  options={MISTAKES}
-                  selected={form.tags?.mistakes || []}
-                  onToggle={(tag) => toggleTag('mistakes', tag)}
-                  color="var(--red)"
-                />
+                {TAG_CATEGORIES.map(cat => (
+                  <TagSection
+                    key={cat.key}
+                    label={cat.label}
+                    options={cat.options}
+                    customTags={customTags?.[cat.key] || []}
+                    onAddCustom={onAddCustomTag ? (tag) => onAddCustomTag(cat.key, tag) : undefined}
+                    selected={form.tags?.[cat.key] || []}
+                    onToggle={(tag) => toggleTag(cat.key, tag)}
+                    color={cat.color}
+                  />
+                ))}
               </motion.div>
             )}
           </AnimatePresence>
