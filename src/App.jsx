@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles } from 'lucide-react'
+import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles, FileDown } from 'lucide-react'
 import { getDefaultState, createTrade, exportData, exportForAI, importData, createStrategyAssignment } from './lib/store'
 import {
   isSupabaseConfigured,
@@ -14,12 +14,14 @@ import {
   signOut,
   pushAssignment,
   closeActiveAssignment,
+  upsertBotTrades,
 } from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
 import TradeLog from './pages/TradeLog'
 import Analytics from './pages/Analytics'
 import Accounts from './pages/Accounts'
+import ImportBotTrades from './pages/ImportBotTrades'
 import TradeModal from './components/TradeModal'
 import TradeDetailView from './pages/TradeDetailView'
 import AuthGate from './components/AuthGate'
@@ -32,6 +34,7 @@ const NAV = [
   { id: 'tradelog', label: 'Trade Log', icon: PenLine },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'accounts', label: 'Accounts', icon: Users },
+  { id: 'import', label: 'Import Bot', icon: FileDown },
 ]
 
 const pageTransition = {
@@ -263,6 +266,31 @@ export default function App() {
     updateSettings({ theme: state.settings.theme === 'dark' ? 'light' : 'dark' })
   }
 
+  // ═══ Bot trade import ═══
+
+  // Optimistically merge a batch of bot trades into state and push to Supabase.
+  // On failure, revert the local addition. Returns a promise so the import UI
+  // can show success/error feedback.
+  const importBotTrades = useCallback(async (trades) => {
+    if (!trades || trades.length === 0) return
+    let prev = null
+    setState(s => {
+      prev = s.botTrades || []
+      return { ...s, botTrades: [...trades, ...prev] }
+    })
+    if (!user) return
+    markSyncing()
+    try {
+      await upsertBotTrades(trades, user.id)
+      markSynced()
+    } catch (err) {
+      console.error('Bot trade import sync failed:', err)
+      setState(s => ({ ...s, botTrades: prev }))
+      markError(err)
+      throw err
+    }
+  }, [user, markSyncing, markSynced, markError])
+
   // ═══ Bot strategy assignments ═══
 
   // Switch the active strategy on a bot account.
@@ -373,13 +401,14 @@ export default function App() {
       )
     }
 
-    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings, switchStrategy }
+    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings, switchStrategy, importBotTrades }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />
       case 'tradelog': return <TradeLog {...props} />
       case 'analytics': return <Analytics {...props} />
       case 'accounts': return <Accounts {...props} />
+      case 'import': return <ImportBotTrades {...props} />
       default: return <Dashboard {...props} />
     }
   }
