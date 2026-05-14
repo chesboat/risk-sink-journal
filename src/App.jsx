@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles } from 'lucide-react'
-import { getDefaultState, createTrade, exportData, exportForAI, importData } from './lib/store'
+import { getDefaultState, createTrade, exportData, exportForAI, importData, createStrategyAssignment } from './lib/store'
 import {
   isSupabaseConfigured,
   pullState,
@@ -12,6 +12,8 @@ import {
   getCurrentUser,
   onAuthChange,
   signOut,
+  pushAssignment,
+  closeActiveAssignment,
 } from './lib/supabase'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
@@ -124,6 +126,8 @@ export default function App() {
         )
         setState({
           trades,
+          botTrades: remote.botTrades || [],
+          strategyAssignments: remote.strategyAssignments || [],
           accounts: remote.accounts || defaults.accounts,
           settings: { ...defaults.settings, ...(remote.settings || {}) },
         })
@@ -259,6 +263,44 @@ export default function App() {
     updateSettings({ theme: state.settings.theme === 'dark' ? 'light' : 'dark' })
   }
 
+  // ═══ Bot strategy assignments ═══
+
+  // Switch the active strategy on a bot account.
+  // Atomically closes any currently-active assignment and opens a new one at
+  // `switchAt`. The partial unique index in the DB guarantees only one active
+  // assignment per account, so two parallel swaps can't both leave open rows.
+  const switchStrategy = useCallback(({ accountId, strategyName, switchAt, note }) => {
+    if (!accountId || !strategyName?.trim()) return
+    const startedAt = switchAt ? new Date(switchAt).toISOString() : new Date().toISOString()
+    const newAssignment = createStrategyAssignment({
+      accountId, strategyName, startedAt, note,
+    })
+
+    // Optimistic: close current active, add new
+    let prevList = null
+    setState(s => {
+      prevList = s.strategyAssignments || []
+      const closed = prevList.map(a =>
+        a.accountId === accountId && !a.endedAt ? { ...a, endedAt: startedAt } : a
+      )
+      return { ...s, strategyAssignments: [newAssignment, ...closed] }
+    })
+
+    if (!user) return
+    markSyncing()
+    ;(async () => {
+      try {
+        await closeActiveAssignment(accountId, startedAt, user.id)
+        await pushAssignment(newAssignment, user.id)
+        markSynced()
+      } catch (err) {
+        console.error('Switch strategy sync failed:', err)
+        setState(s => ({ ...s, strategyAssignments: prevList }))
+        markError(err)
+      }
+    })()
+  }, [user, markSyncing, markSynced, markError])
+
   // Persist a user-added custom tag so it reappears on the next trade.
   // No-op if the tag already exists in this category.
   const addCustomTag = useCallback((category, tag) => {
@@ -331,7 +373,7 @@ export default function App() {
       )
     }
 
-    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings }
+    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings, switchStrategy }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />

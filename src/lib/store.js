@@ -30,13 +30,18 @@ export const ENTRY_LABELS = { 1: 'E1 · 3R', 2: 'E2 · 4R', 3: 'E3 · 5R' };
 export const ENTRY_TARGETS = { 1: 3, 2: 4, 3: 5 };
 
 // ── Default State ──
+// Accounts share a single array. `kind` discriminates manual (risk-sink E1/E2/E3)
+// from bot (auto-ingested fills). Manual is the default for backwards-compat with
+// pre-bot-feature data — see normalizeAccount() for the read-path defaulting.
 export function getDefaultState() {
   return {
     trades: [],
+    botTrades: [],
+    strategyAssignments: [],
     accounts: [
-      { id: 1, name: 'Account 1', slot: 1, health: 'Eval', startingPnl: 0, history: [] },
-      { id: 2, name: 'Account 2', slot: 2, health: 'Eval', startingPnl: 0, history: [] },
-      { id: 3, name: 'Account 3', slot: 3, health: 'Eval', startingPnl: 0, history: [] },
+      { id: 1, kind: 'manual', name: 'Account 1', slot: 1, health: 'Eval', startingPnl: 0, history: [] },
+      { id: 2, kind: 'manual', name: 'Account 2', slot: 2, health: 'Eval', startingPnl: 0, history: [] },
+      { id: 3, kind: 'manual', name: 'Account 3', slot: 3, health: 'Eval', startingPnl: 0, history: [] },
     ],
     settings: {
       theme: 'dark',
@@ -611,7 +616,9 @@ export function calcStats(trades, period = 'all') {
 // ── Risk Sink Score ──
 export function calcRiskScore(trades, accounts, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
-  const a = accounts || [];
+  // Risk Sink Score is a manual-strategy metric (idea WR, entry discipline,
+  // pooled MLL, etc). Filter bot accounts out so they don't inflate maxMll.
+  const a = getManualAccounts(accounts || []);
   if (!trades || trades.length < 3) return { score: 0, grades: {}, label: 'Not enough data' };
 
   const stats = calcStats(trades, 'all');
@@ -780,7 +787,9 @@ export function calcRiskSinkLift(trades) {
 // (all accounts summed, chronological by trade date then createdAt).
 export function calcPooledHealth(trades, accounts, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 }
-  const accts = accounts || []
+  // Pooled risk-sink health is a manual-strategy concept (E1/E2/E3). Bot accounts
+  // have their own MLL/PT tracking and don't belong in this pool.
+  const accts = getManualAccounts(accounts || [])
   const perAccountMll = s.mll || 2000
   const perAccountPt = s.profitTarget || 3000
   const pooledMll = perAccountMll * accts.length
@@ -1106,4 +1115,150 @@ export function formatCurrency(n) {
 
 export function formatPnl(n) {
   return n >= 0 ? `+$${n.toFixed(0)}` : `-$${Math.abs(n).toFixed(0)}`;
+}
+
+// ═══════════════════════════════════════════════════
+// BOT ACCOUNTS, BOT TRADES, STRATEGY ASSIGNMENTS
+// ═══════════════════════════════════════════════════
+
+export const BROKERS = ['tradovate', 'topstepx'];
+// Display label for a broker key
+export const BROKER_LABEL = { tradovate: 'Tradovate', topstepx: 'TopstepX' };
+
+// Read-path defaulting: any account written before the `kind` field existed
+// gets treated as manual. Always call this when reading accounts from state.
+export function normalizeAccount(a) {
+  return { kind: 'manual', ...a };
+}
+
+export function getManualAccounts(accounts) {
+  return (accounts || []).map(normalizeAccount).filter(a => a.kind === 'manual');
+}
+
+export function getBotAccounts(accounts) {
+  return (accounts || []).map(normalizeAccount).filter(a => a.kind === 'bot');
+}
+
+// Create a new bot account. broker is the platform that hosts the account
+// (tradovate covers Lucid + Tradeify; topstepx covers Topstep).
+// externalAccountId is the broker's own account ID, used by ingestion to know
+// which Tradovate/TopstepX account a fill came from.
+export function createBotAccount({ name, broker, externalAccountId, propFirm = '', startingPnl = 0 } = {}) {
+  return {
+    id: crypto.randomUUID(),
+    kind: 'bot',
+    name: name || 'Bot Account',
+    broker: broker || 'tradovate',
+    propFirm,               // free-form: 'Lucid', 'Tradeify', 'Topstep', …
+    externalAccountId: externalAccountId || '',
+    health: 'Eval',
+    startingPnl,
+    history: [],            // unused for bots; kept for shape parity
+    createdAt: Date.now(),
+  };
+}
+
+// ── Strategy assignment helpers ──
+
+export function createStrategyAssignment({ accountId, strategyName, startedAt, note }) {
+  return {
+    id: crypto.randomUUID(),
+    accountId,
+    strategyName: (strategyName || '').trim(),
+    startedAt: startedAt || new Date().toISOString(),
+    endedAt: null,
+    note: (note || '').trim() || null,
+  };
+}
+
+// Active assignment for an account (ended_at is null).
+export function getActiveAssignment(assignments, accountId) {
+  return (assignments || []).find(a => a.accountId === accountId && !a.endedAt) || null;
+}
+
+// All assignments for an account, sorted newest-first by startedAt.
+export function getAssignmentHistory(assignments, accountId) {
+  return (assignments || [])
+    .filter(a => a.accountId === accountId)
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+}
+
+// Which strategy was active on `accountId` at ISO timestamp `ts`?
+// Used to attribute a bot_trade to a strategy at fill time.
+// Returns the assignment record, or null if none was active then.
+export function getStrategyAt(assignments, accountId, ts) {
+  const tms = new Date(ts).getTime();
+  return (assignments || []).find(a => {
+    if (a.accountId !== accountId) return false;
+    const start = new Date(a.startedAt).getTime();
+    if (start > tms) return false;
+    if (!a.endedAt) return true; // currently active
+    return new Date(a.endedAt).getTime() > tms;
+  }) || null;
+}
+
+// Tag every bot trade with its strategyName based on the active assignment
+// at exit_ts. Returns a new array; does not mutate input.
+export function tagBotTradesWithStrategy(botTrades, assignments) {
+  return (botTrades || []).map(t => {
+    const a = getStrategyAt(assignments, t.account_id, t.exit_ts);
+    return { ...t, strategy: a ? a.strategyName : null };
+  });
+}
+
+// Distinct strategy names seen across history — useful for autocomplete
+// when adding a new assignment.
+export function getAllStrategyNames(assignments) {
+  const set = new Set();
+  (assignments || []).forEach(a => { if (a.strategyName) set.add(a.strategyName); });
+  return Array.from(set).sort();
+}
+
+// ── Bot account stats ──
+// Mirrors getAccountStats() shape for manual accounts so the same UI components
+// can render either. Operates on bot_trades rather than trades.entries.
+export function getBotAccountStats(account, botTrades, settings) {
+  const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
+  const mine = (botTrades || []).filter(t => t.account_id === account.id);
+
+  // Sort chronologically by exit_ts to compute peak/floor
+  const sorted = [...mine].sort((a, b) => new Date(a.exit_ts) - new Date(b.exit_ts));
+
+  let running = account.startingPnl || 0;
+  let peak = running;
+  sorted.forEach(t => {
+    running += (Number(t.pnl) || 0) - (Number(t.fees) || 0);
+    if (running > peak) peak = running;
+  });
+
+  const totalPnl = running;
+  const trailingFloor = Math.min(0, peak - s.mll);
+  const distanceToBust = totalPnl - trailingFloor;
+  const busted = distanceToBust <= 0;
+  const mllUsed = Math.max(0, Math.min(s.mll, s.mll - distanceToBust));
+  const mllLeft = Math.max(0, s.mll - mllUsed);
+  const mllPercent = (mllLeft / s.mll) * 100;
+
+  const ptProgress = Math.max(0, totalPnl);
+  const wins = mine.filter(t => Number(t.pnl) > 0).length;
+  const losses = mine.filter(t => Number(t.pnl) < 0).length;
+  const decisive = wins + losses;
+
+  return {
+    totalPnl,
+    trades: mine.length,
+    wins,
+    losses,
+    winRate: decisive > 0 ? wins / decisive : 0,
+    mllUsed,
+    mllLeft,
+    mllPercent,
+    mllPeak: peak,
+    mllFloor: trailingFloor,
+    mllDistance: distanceToBust,
+    mllBusted: busted,
+    ptProgress,
+    ptLeft: s.profitTarget - ptProgress,
+    ptPercent: (ptProgress / s.profitTarget) * 100,
+  };
 }

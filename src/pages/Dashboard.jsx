@@ -17,9 +17,11 @@ import {
   getNetPnl,
   formatPnl,
   getAccountStats,
+  getManualAccounts,
   ENTRY_LABELS,
   ENTRY_COLORS,
 } from '../lib/store';
+import { User, Bot } from 'lucide-react';
 
 // CountUp Hook with easeOutCubic
 const useCountUp = (target, duration = 1200) => {
@@ -808,6 +810,79 @@ const RecentTradesList = ({ trades, onEditTrade }) => {
   );
 };
 
+// Combined P&L summary across manual + bot. Shows today and the active period
+// so the user gets a single "how did everything go" view at the top of the dash.
+const CombinedSummary = ({ trades, botTrades, period }) => {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  // Period window for "period total"
+  const periodStart = useMemo(() => {
+    const d = new Date();
+    if (period === 'Week') d.setDate(d.getDate() - 7);
+    else if (period === 'Month') { d.setDate(1); }
+    else d.setFullYear(d.getFullYear() - 100);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [period]);
+
+  const localDateOf = (ts) => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  let manualToday = 0, manualPeriod = 0, botToday = 0, botPeriod = 0;
+  (trades || []).forEach(t => {
+    const pnl = getNetPnl(t);
+    if (t.date === todayStr) manualToday += pnl;
+    if (new Date(t.date + 'T00:00:00') >= periodStart) manualPeriod += pnl;
+  });
+  (botTrades || []).forEach(bt => {
+    const net = (Number(bt.pnl) || 0) - (Number(bt.fees) || 0);
+    const exitDate = localDateOf(bt.exit_ts);
+    if (exitDate === todayStr) botToday += net;
+    if (new Date(bt.exit_ts) >= periodStart) botPeriod += net;
+  });
+
+  const todayTotal = manualToday + botToday;
+  const periodTotal = manualPeriod + botPeriod;
+
+  const Row = ({ label, manual, bot, total }) => (
+    <div className="flex items-center justify-between py-2">
+      <div className="text-xs font-semibold opacity-60 uppercase tracking-wide">{label}</div>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5 text-xs">
+          <User size={11} style={{ color: 'var(--blue)' }} />
+          <span className="opacity-60">Manual</span>
+          <span className="font-mono font-bold" style={{ color: manual >= 0 ? 'var(--green)' : 'var(--red)' }}>{formatPnl(manual)}</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <Bot size={11} style={{ color: '#a855f7' }} />
+          <span className="opacity-60">Bot</span>
+          <span className="font-mono font-bold" style={{ color: bot >= 0 ? 'var(--green)' : 'var(--red)' }}>{formatPnl(bot)}</span>
+        </div>
+        <div className="text-sm font-bold font-mono pl-3 border-l" style={{ borderColor: 'var(--border)', color: total >= 0 ? 'var(--green)' : 'var(--red)', minWidth: 90, textAlign: 'right' }}>
+          {formatPnl(total)}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="rounded-[14px] p-5 border"
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      <Row label="Today" manual={manualToday} bot={botToday} total={todayTotal} />
+      <div className="border-t" style={{ borderColor: 'var(--border)' }} />
+      <Row label={period} manual={manualPeriod} bot={botPeriod} total={periodTotal} />
+    </motion.div>
+  );
+};
+
 // Main Dashboard Component
 export default function Dashboard({ state, openEditTrade }) {
   const [period, setPeriod] = useState('Month');
@@ -824,8 +899,10 @@ export default function Dashboard({ state, openEditTrade }) {
     E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: (stats.byEntry?.[2]?.trades || 0) },
   };
 
-  // Prepare account stats
-  const accountStats = (state.accounts || []).map((account) =>
+  // Manual-only account list for the risk-sink stats panels below (bot accounts
+  // have their own card grid on the Accounts page).
+  const manualAccounts = useMemo(() => getManualAccounts(state.accounts || []), [state.accounts]);
+  const accountStats = manualAccounts.map((account) =>
     getAccountStats(account, state.trades || [], state.settings)
   );
 
@@ -870,6 +947,9 @@ export default function Dashboard({ state, openEditTrade }) {
           ))}
         </div>
       </div>
+
+      {/* Combined daily/period roll-up — manual + bot side-by-side */}
+      <CombinedSummary trades={state.trades} botTrades={state.botTrades} period={period} />
 
       {/* Stat Cards Grid */}
       <div className="grid grid-cols-4 gap-4" style={{ alignItems: 'stretch' }}>
@@ -941,7 +1021,7 @@ export default function Dashboard({ state, openEditTrade }) {
         <div>
           <h2 className="text-xs font-semibold tracking-wide opacity-60 mb-3" style={{ textTransform: 'uppercase' }}>Account Rotation</h2>
           <div className="grid grid-cols-3 gap-4">
-            {state.accounts.map((account, idx) => (
+            {manualAccounts.map((account, idx) => (
               <AccountHealthCard
                 key={account.id}
                 account={account}

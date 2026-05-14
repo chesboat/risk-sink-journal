@@ -1,7 +1,21 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { RefreshCw, AlertCircle, CheckCircle, TrendingUp, Shield } from 'lucide-react';
-import { getAccountStats, HEALTH_STATUSES, ENTRY_LABELS, ENTRY_COLORS } from '../lib/store';
+import React, { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { RefreshCw, AlertCircle, CheckCircle, TrendingUp, Shield, Bot, Plus, Repeat, History, X, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  getAccountStats,
+  HEALTH_STATUSES,
+  ENTRY_LABELS,
+  ENTRY_COLORS,
+  getManualAccounts,
+  getBotAccounts,
+  createBotAccount,
+  getBotAccountStats,
+  getActiveAssignment,
+  getAssignmentHistory,
+  getAllStrategyNames,
+  BROKERS,
+  BROKER_LABEL,
+} from '../lib/store';
 
 const SLOT_COLORS = {
   E1: '#22c55e', // green
@@ -340,6 +354,496 @@ const AccountCard = ({ account, onUpdate, settings, trades }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════
+// BOT ACCOUNTS
+// ═══════════════════════════════════════════════════
+
+const BOT_ACCENT = '#a855f7'; // purple — visually distinct from manual slot colors
+
+const SwitchStrategyModal = ({ account, activeAssignment, suggestions, onSave, onClose }) => {
+  // Default the switchover time to "right now" in local-input format
+  const nowLocal = () => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  };
+  const [name, setName] = useState('');
+  const [when, setWhen] = useState(nowLocal());
+  const [note, setNote] = useState('');
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSave({
+      strategyName: name.trim(),
+      switchAt: new Date(when).toISOString(),
+      note: note.trim(),
+    });
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+        className="w-full max-w-md rounded-2xl border p-6"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Repeat size={18} style={{ color: BOT_ACCENT }} />
+            Switch Strategy
+          </h3>
+          <button onClick={onClose} className="p-1 border-0 bg-transparent cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="text-xs text-gray-400 mb-4">
+          {account.name}
+          {activeAssignment && (
+            <> · currently: <span className="text-white">{activeAssignment.strategyName}</span></>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">New strategy name</label>
+            <input
+              type="text"
+              list="strategy-suggestions"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. MNQ-CISD-Bot"
+              autoFocus
+              className="w-full px-3 py-2 rounded-xl border text-white"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+            <datalist id="strategy-suggestions">
+              {suggestions.map(s => <option key={s} value={s} />)}
+            </datalist>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Switchover time</label>
+            <input
+              type="datetime-local"
+              value={when}
+              onChange={(e) => setWhen(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border text-white"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+            <div className="text-[11px] text-gray-500 mt-1">
+              Trades that fill after this time get attributed to the new strategy.
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Note (optional)</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="e.g. tightened stop to 1.2R"
+              className="w-full px-3 py-2 rounded-xl border text-white text-sm"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border text-sm cursor-pointer"
+            style={{ background: 'transparent', borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!name.trim()}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-white keep-white border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: BOT_ACCENT }}
+          >
+            Switch
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+const AddBotAccountModal = ({ onSave, onClose }) => {
+  const [name, setName] = useState('');
+  const [broker, setBroker] = useState('tradovate');
+  const [propFirm, setPropFirm] = useState('');
+  const [externalAccountId, setExternalAccountId] = useState('');
+  const [startingPnl, setStartingPnl] = useState('0');
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      broker,
+      propFirm: propFirm.trim(),
+      externalAccountId: externalAccountId.trim(),
+      startingPnl: parseFloat(startingPnl) || 0,
+    });
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+        className="w-full max-w-md rounded-2xl border p-6"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Bot size={18} style={{ color: BOT_ACCENT }} />
+            Add Bot Account
+          </h3>
+          <button onClick={onClose} className="p-1 border-0 bg-transparent cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Account name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Lucid Bot 1"
+              autoFocus
+              className="w-full px-3 py-2 rounded-xl border text-white"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Broker platform</label>
+              <select
+                value={broker}
+                onChange={(e) => setBroker(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border text-white"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+              >
+                {BROKERS.map(b => <option key={b} value={b}>{BROKER_LABEL[b]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Prop firm</label>
+              <input
+                type="text"
+                value={propFirm}
+                onChange={(e) => setPropFirm(e.target.value)}
+                placeholder="Lucid, Tradeify, Topstep"
+                className="w-full px-3 py-2 rounded-xl border text-white"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Broker account ID</label>
+            <input
+              type="text"
+              value={externalAccountId}
+              onChange={(e) => setExternalAccountId(e.target.value)}
+              placeholder="Used by ingestion to match fills"
+              className="w-full px-3 py-2 rounded-xl border text-white"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+            <div className="text-[11px] text-gray-500 mt-1">
+              Optional now; required before automatic ingestion can pull fills for this account.
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Starting P&L</label>
+            <div className="flex items-center">
+              <span className="text-gray-400 mr-2">$</span>
+              <input
+                type="number"
+                value={startingPnl}
+                onChange={(e) => setStartingPnl(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-xl border text-white"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border text-sm cursor-pointer"
+            style={{ background: 'transparent', borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!name.trim()}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-white keep-white border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: BOT_ACCENT }}
+          >
+            Add
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+const BotAccountCard = ({ account, botTrades, assignments, settings, onSwitch, onUpdate, onDelete, suggestions }) => {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const stats = getBotAccountStats(account, botTrades, settings);
+  const active = getActiveAssignment(assignments, account.id);
+  const history = getAssignmentHistory(assignments, account.id);
+
+  const handleHealthChange = (newStatus) => onUpdate({ ...account, health: newStatus });
+  const handleNameChange = (newName) => onUpdate({ ...account, name: newName });
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+      className="relative rounded-xl border p-6 overflow-hidden"
+      style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      <div className="absolute left-0 top-4 bottom-4 w-1 rounded-r" style={{ backgroundColor: BOT_ACCENT }} />
+
+      <div className="space-y-4">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <EditableField value={account.name} onChange={handleNameChange} label="Account Name" />
+          </div>
+          <div className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wide" style={{ background: BOT_ACCENT, color: 'white' }}>
+            <Bot size={11} /> Bot
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <div className="text-gray-400">Broker</div>
+            <div className="text-white font-medium">{BROKER_LABEL[account.broker] || account.broker || '—'}</div>
+          </div>
+          <div>
+            <div className="text-gray-400">Prop firm</div>
+            <div className="text-white font-medium">{account.propFirm || '—'}</div>
+          </div>
+        </div>
+
+        {/* Current strategy + Switch button */}
+        <div className="rounded-lg p-3" style={{ background: 'var(--surface)' }}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] uppercase tracking-wide text-gray-400">Current strategy</div>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border-0 cursor-pointer text-white keep-white"
+              style={{ background: BOT_ACCENT }}
+            >
+              <Repeat size={11} />
+              {active ? 'Switch' : 'Assign'}
+            </button>
+          </div>
+          <div className="text-white font-medium text-sm">
+            {active ? active.strategyName : <span className="text-gray-500 italic">No strategy assigned</span>}
+          </div>
+          {active && (
+            <div className="text-[11px] text-gray-500 mt-0.5">since {fmtDate(active.startedAt)}</div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-gray-400 block mb-2">Health Status</label>
+          <HealthChip status={account.health} onStatusChange={handleHealthChange} />
+        </div>
+
+        <div className="border-t border-gray-700 pt-4">
+          <div className="mb-4">
+            <div className="text-xs text-gray-400 mb-1">Total P&L</div>
+            <div className="text-2xl font-bold" style={{ color: stats.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              ${stats.totalPnl.toFixed(2)}
+            </div>
+            <div className="text-[11px] text-gray-500 mt-1">
+              {stats.trades} trades · {stats.wins}W / {stats.losses}L · WR {(stats.winRate * 100).toFixed(0)}%
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center justify-center relative" style={{ width: 52, height: 52 }}>
+              <ProgressRing percentage={stats.ptPercent || 0} />
+              <div className="absolute text-xs font-semibold text-white">{Math.round(stats.ptPercent || 0)}%</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">PT Progress</div>
+              <div className="text-sm text-white">
+                ${stats.ptProgress.toFixed(0)} / ${(settings?.profitTarget || 3000).toFixed(0)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <ProgressBar
+              percentage={stats.mllPercent || 0}
+              label={`$${(stats.mllLeft || 0).toFixed(0)} to bust`}
+              color={stats.mllPercent > 50 ? '#22c55e' : stats.mllPercent > 25 ? '#f97316' : '#ef4444'}
+            />
+            <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1.5 font-mono">
+              <span>Peak: ${Math.round(stats.mllPeak).toLocaleString()}</span>
+              <span>Floor: ${Math.round(stats.mllFloor).toLocaleString()}</span>
+              {stats.mllBusted && <span className="text-red-500 font-semibold">BUSTED</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* Strategy history expand */}
+        {history.length > 0 && (
+          <div className="border-t border-gray-700 pt-3">
+            <button
+              onClick={() => setHistoryOpen(o => !o)}
+              className="flex items-center gap-2 text-xs text-gray-400 hover:text-white border-0 bg-transparent cursor-pointer p-0"
+            >
+              <History size={12} />
+              Strategy history ({history.length})
+              {historyOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            <AnimatePresence>
+              {historyOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-1.5 mt-2">
+                    {history.map(h => (
+                      <div key={h.id} className="text-[11px] text-gray-300 p-2 rounded" style={{ background: 'var(--surface)' }}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-white">{h.strategyName}</span>
+                          {!h.endedAt && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded uppercase font-semibold" style={{ background: BOT_ACCENT, color: 'white' }}>
+                              active
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-gray-500 mt-0.5">
+                          {fmtDate(h.startedAt)} → {h.endedAt ? fmtDate(h.endedAt) : 'now'}
+                        </div>
+                        {h.note && <div className="text-gray-400 italic mt-1">"{h.note}"</div>}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        <button
+          onClick={() => { if (confirm(`Delete bot account "${account.name}"? Bot trades for this account remain in the database.`)) onDelete(account.id); }}
+          className="text-[11px] text-gray-500 hover:text-red-400 border-0 bg-transparent cursor-pointer p-0"
+        >
+          Delete account
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {modalOpen && (
+          <SwitchStrategyModal
+            account={account}
+            activeAssignment={active}
+            suggestions={suggestions}
+            onSave={({ strategyName, switchAt, note }) => onSwitch({ accountId: account.id, strategyName, switchAt, note })}
+            onClose={() => setModalOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
+const BotAccountsSection = ({ botAccounts, botTrades, assignments, settings, onAdd, onUpdate, onDelete, onSwitch }) => {
+  const [addOpen, setAddOpen] = useState(false);
+  const suggestions = useMemo(() => getAllStrategyNames(assignments), [assignments]);
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+          <Bot size={20} style={{ color: BOT_ACCENT }} />
+          Bot Accounts
+          <span className="text-sm text-gray-400 font-normal">({botAccounts.length})</span>
+        </h2>
+        <button
+          onClick={() => setAddOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white keep-white border-0 cursor-pointer"
+          style={{ background: BOT_ACCENT }}
+        >
+          <Plus size={14} />
+          Add Bot Account
+        </button>
+      </div>
+
+      {botAccounts.length === 0 ? (
+        <div
+          className="rounded-xl border border-dashed p-8 text-center"
+          style={{ borderColor: 'var(--border)', background: 'var(--card)' }}
+        >
+          <Bot size={28} className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
+          <div className="text-sm text-gray-400">No bot accounts yet</div>
+          <div className="text-xs text-gray-500 mt-1">Add one to start tracking automated trades.</div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {botAccounts.map(a => (
+            <BotAccountCard
+              key={a.id}
+              account={a}
+              botTrades={botTrades}
+              assignments={assignments}
+              settings={settings}
+              onSwitch={onSwitch}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              suggestions={suggestions}
+            />
+          ))}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {addOpen && (
+          <AddBotAccountModal
+            onSave={onAdd}
+            onClose={() => setAddOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const SettingsSection = ({ settings, onSettingsChange }) => {
   const handleChange = (key, value) => {
     const numValue = parseFloat(value) || 0;
@@ -548,12 +1052,24 @@ const AccountHistory = ({ accounts }) => {
   );
 };
 
-const Accounts = ({ state, updateAccounts, updateSettings }) => {
+const Accounts = ({ state, updateAccounts, updateSettings, switchStrategy }) => {
+  const manualAccounts = getManualAccounts(state.accounts);
+  const botAccounts = getBotAccounts(state.accounts);
+
   const handleAccountUpdate = (updatedAccount) => {
     const updatedAccounts = state.accounts.map((acc) =>
       acc.id === updatedAccount.id ? updatedAccount : acc
     );
     updateAccounts(updatedAccounts);
+  };
+
+  const handleAddBotAccount = (input) => {
+    const newAccount = createBotAccount(input);
+    updateAccounts([...state.accounts, newAccount]);
+  };
+
+  const handleDeleteBotAccount = (id) => {
+    updateAccounts(state.accounts.filter(a => a.id !== id));
   };
 
   return (
@@ -564,22 +1080,41 @@ const Accounts = ({ state, updateAccounts, updateSettings }) => {
         transition={{ duration: 0.5 }}
         className="mb-8"
       >
-        <h1 className="text-4xl font-bold text-white">Account Rotation</h1>
-        <p className="text-gray-400 mt-2">Manage and rotate your trading accounts across slots</p>
+        <h1 className="text-4xl font-bold text-white">Accounts</h1>
+        <p className="text-gray-400 mt-2">Manual risk-sink accounts and bot accounts</p>
       </motion.div>
 
-      {/* Account Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {state.accounts.map((account) => (
-          <AccountCard
-            key={account.id}
-            account={account}
-            trades={state.trades}
-            onUpdate={handleAccountUpdate}
-            settings={state.settings}
-          />
-        ))}
+      {/* Manual Account Cards Grid (E1/E2/E3) */}
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+          <RefreshCw size={20} />
+          Risk-Sink Accounts
+          <span className="text-sm text-gray-400 font-normal">({manualAccounts.length})</span>
+        </h2>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {manualAccounts.map((account) => (
+            <AccountCard
+              key={account.id}
+              account={account}
+              trades={state.trades}
+              onUpdate={handleAccountUpdate}
+              settings={state.settings}
+            />
+          ))}
+        </div>
       </div>
+
+      {/* Bot Accounts */}
+      <BotAccountsSection
+        botAccounts={botAccounts}
+        botTrades={state.botTrades || []}
+        assignments={state.strategyAssignments || []}
+        settings={state.settings}
+        onAdd={handleAddBotAccount}
+        onUpdate={handleAccountUpdate}
+        onDelete={handleDeleteBotAccount}
+        onSwitch={switchStrategy}
+      />
 
       {/* Settings Section */}
       <div className="mb-8">
@@ -594,8 +1129,8 @@ const Accounts = ({ state, updateAccounts, updateSettings }) => {
         <RotationGuide />
       </div>
 
-      {/* Account History */}
-      <AccountHistory accounts={state.accounts} />
+      {/* Account History (manual slot rotations) */}
+      <AccountHistory accounts={manualAccounts} />
     </div>
   );
 };
