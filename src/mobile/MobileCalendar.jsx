@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { getIdeaResult, getNetPnl, getNetR, formatCurrency } from '../lib/store'
+import { getIdeaResult, getNetPnl, getNetR, formatCurrency, getActiveManualAccounts } from '../lib/store'
 
 // ═══════════════════════════════════════════════════
 // MOBILE CALENDAR — Weekday-only grid tuned for phones
@@ -99,7 +99,9 @@ export default function MobileCalendar({ state, openViewTrade }) {
   const [selectedDate, setSelectedDate] = useState(null)
   const [accountFilter, setAccountFilter] = useState(null) // null = all, or slot number
 
-  const accounts = state.accounts || []
+  // Filter chips show the active manual accounts (archived history stays
+  // filterable on the desktop calendar)
+  const accounts = getActiveManualAccounts(state.accounts || [])
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()

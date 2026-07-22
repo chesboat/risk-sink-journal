@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Edit2, Check, X } from 'lucide-react'
-import { HEALTH_STATUSES, getAccountStats, formatCurrency } from '../lib/store'
+import { HEALTH_STATUSES, getAccountStats, getActiveManualAccounts, formatCurrency } from '../lib/store'
 
 function HealthPill({ status }) {
   const colors = {
@@ -347,7 +347,7 @@ export default function MobileAccounts({ state, updateAccounts, updateSettings }
       <div className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
         Accounts
       </div>
-      {(state.accounts || []).map((a) => (
+      {getActiveManualAccounts(state.accounts || []).map((a) => (
         <AccountCard
           key={a.id}
           account={a}

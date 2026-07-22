@@ -116,14 +116,16 @@ export function buildAIMarkdown(state) {
     return `${sign}$${Math.abs(Math.round(n)).toLocaleString()}`;
   };
   const slotName = (slot) => {
-    const acct = accounts.find(a => a.slot === slot);
+    const acct = getActiveManualAccounts(accounts).find(a => a.slot === slot)
+      || accounts.find(a => a.slot === slot);
     return acct ? acct.name : `Slot ${slot}`;
   };
   const cleanText = (s) => (s || '').replace(/\s+/g, ' ').trim();
 
-  // Per-account totals
+  // Per-account totals (each account only owns trades in its active window)
   const perAccount = accounts.map(a => {
-    const triggered = sorted.flatMap(t => (t.entries || []).filter(e => e.slot === a.slot && e.triggered));
+    const triggered = sorted.filter(t => tradeInAccountWindow(a, t))
+      .flatMap(t => (t.entries || []).filter(e => e.slot === a.slot && e.triggered));
     const wins = triggered.filter(e => e.result === 'W');
     const losses = triggered.filter(e => e.result === 'L');
     const bes = triggered.filter(e => e.result === 'BE');
@@ -171,7 +173,8 @@ export function buildAIMarkdown(state) {
     lines.push('- *(no accounts configured)*');
   } else {
     accounts.forEach(a => {
-      lines.push(`- **E${a.slot}** (slot ${a.slot}) → \`${a.name}\` — health: ${a.health || 'unknown'}, starting PnL: ${fmt$(a.startingPnl || 0)}`);
+      const archivedTag = a.archived ? ` — ARCHIVED${a.archivedAt ? ` ${a.archivedAt.slice(0, 10)}` : ''} (historical era)` : '';
+      lines.push(`- **E${a.slot}** (slot ${a.slot}) → \`${a.name}\` — health: ${a.health || 'unknown'}, starting PnL: ${fmt$(a.startingPnl || 0)}${archivedTag}`);
     });
   }
   lines.push('');
@@ -617,8 +620,9 @@ export function calcStats(trades, period = 'all') {
 export function calcRiskScore(trades, accounts, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
   // Risk Sink Score is a manual-strategy metric (idea WR, entry discipline,
-  // pooled MLL, etc). Filter bot accounts out so they don't inflate maxMll.
-  const a = getManualAccounts(accounts || []);
+  // pooled MLL, etc). Filter bot and archived accounts out so they don't
+  // inflate maxMll — the score reflects the currently-live account set.
+  const a = getActiveManualAccounts(accounts || []);
   if (!trades || trades.length < 3) return { score: 0, grades: {}, label: 'Not enough data' };
 
   const stats = calcStats(trades, 'all');
@@ -788,8 +792,9 @@ export function calcRiskSinkLift(trades) {
 export function calcPooledHealth(trades, accounts, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 }
   // Pooled risk-sink health is a manual-strategy concept (E1/E2/E3). Bot accounts
-  // have their own MLL/PT tracking and don't belong in this pool.
-  const accts = getManualAccounts(accounts || [])
+  // have their own MLL/PT tracking and don't belong in this pool; archived
+  // accounts are no longer part of the live system.
+  const accts = getActiveManualAccounts(accounts || [])
   const perAccountMll = s.mll || 2000
   const perAccountPt = s.profitTarget || 3000
   const pooledMll = perAccountMll * accts.length
@@ -880,6 +885,7 @@ export function calcPooledHealth(trades, accounts, settings) {
     const dayDelta = (t.entries || []).reduce((s, e) => {
       if (!e.triggered) return s
       const idx = acctState.findIndex((st) => st.slot === e.slot)
+      if (idx >= 0 && !tradeInAccountWindow(accts[idx], t)) return s
       if (idx >= 0) {
         acctState[idx].running += e.pnl || 0
         if (acctState[idx].running > acctState[idx].peak) {
@@ -961,8 +967,9 @@ export function calcTrailingMll(account, trades, settings) {
   const mllInitial = s.mll || 2000
   const seed = account.startingPnl || 0
 
-  // Build per-account chronological deltas from triggered entries on this slot
-  const sorted = [...(trades || [])].sort((a, b) => {
+  // Build per-account chronological deltas from triggered entries on this slot,
+  // limited to the account's active window (generational accounts).
+  const sorted = getTradesForAccount(account, trades).sort((a, b) => {
     const da = new Date(a.date + 'T00:00:00').getTime()
     const db = new Date(b.date + 'T00:00:00').getTime()
     if (da !== db) return da - db
@@ -1014,7 +1021,9 @@ export function getAccountPnl(trades, slot) {
 
 export function getAccountStats(account, trades, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
-  const journalPnl = getAccountPnl(trades || [], account.slot);
+  // Only trades inside this account's active window count toward its stats
+  const owned = getTradesForAccount(account, trades);
+  const journalPnl = getAccountPnl(owned, account.slot);
   const totalPnl = (account.startingPnl || 0) + journalPnl;
 
   // Trailing MLL: uses chronological peak tracking per account
@@ -1023,7 +1032,7 @@ export function getAccountStats(account, trades, settings) {
   const ptProgress = Math.max(0, totalPnl);
   const ptLeft = s.profitTarget - ptProgress;
 
-  const entries = trades.flatMap(t => t.entries.filter(e => e.slot === account.slot && e.triggered && e.result));
+  const entries = owned.flatMap(t => t.entries.filter(e => e.slot === account.slot && e.triggered && e.result));
   const wins = entries.filter(e => e.result === 'W');
   const slotWR = entries.length > 0 ? wins.length / entries.length : 0;
 
@@ -1133,6 +1142,45 @@ export function normalizeAccount(a) {
 
 export function getManualAccounts(accounts) {
   return (accounts || []).map(normalizeAccount).filter(a => a.kind === 'manual');
+}
+
+// ── Account generations ──
+// Manual accounts are generational: archiving an account freezes its trade
+// window and frees its slot for a fresh account. Attribution stays slot-based —
+// an account owns a trade when the slots match AND the trade date falls inside
+// the account's [activeFrom, archivedAt] window. Legacy accounts (no window
+// fields) own every trade on their slot, which matches pre-generation behavior.
+
+export function getActiveManualAccounts(accounts) {
+  return getManualAccounts(accounts).filter(a => !a.archived);
+}
+
+export function getArchivedManualAccounts(accounts) {
+  return getManualAccounts(accounts).filter(a => a.archived);
+}
+
+export function tradeInAccountWindow(account, trade) {
+  const d = trade.date; // YYYY-MM-DD strings compare lexically
+  if (account.activeFrom && d < account.activeFrom) return false;
+  if (account.archived && account.archivedAt && d > account.archivedAt.slice(0, 10)) return false;
+  return true;
+}
+
+export function getTradesForAccount(account, trades) {
+  return (trades || []).filter(t => tradeInAccountWindow(account, t));
+}
+
+export function createManualAccount({ name, slot, startingPnl = 0 } = {}) {
+  return {
+    id: crypto.randomUUID(),
+    kind: 'manual',
+    name: (name || '').trim() || 'New Account',
+    slot,
+    health: 'Eval',
+    startingPnl: Number(startingPnl) || 0,
+    history: [],
+    activeFrom: new Date().toISOString().slice(0, 10),
+  };
 }
 
 export function getBotAccounts(accounts) {

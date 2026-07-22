@@ -8,6 +8,7 @@ import {
   getNetPnl,
   getNetR,
   getAccountStats,
+  getActiveManualAccounts,
   formatCurrency,
 } from '../lib/store'
 
@@ -58,7 +59,7 @@ export default function MobileDashboard({ state, openViewTrade }) {
 
   const accountCards = useMemo(
     () =>
-      (state.accounts || []).map((a) => ({
+      getActiveManualAccounts(state.accounts || []).map((a) => ({
         ...a,
         stats: getAccountStats(a, state.trades || [], state.settings),
       })),

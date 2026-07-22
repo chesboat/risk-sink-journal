@@ -17,7 +17,7 @@ import {
   getNetPnl,
   formatPnl,
   getAccountStats,
-  getManualAccounts,
+  getActiveManualAccounts,
   ENTRY_LABELS,
   ENTRY_COLORS,
 } from '../lib/store';
@@ -899,9 +899,9 @@ export default function Dashboard({ state, openEditTrade }) {
     E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: (stats.byEntry?.[2]?.trades || 0) },
   };
 
-  // Manual-only account list for the risk-sink stats panels below (bot accounts
-  // have their own card grid on the Accounts page).
-  const manualAccounts = useMemo(() => getManualAccounts(state.accounts || []), [state.accounts]);
+  // Active manual accounts only for the risk-sink stats panels below (bot
+  // accounts have their own card grid; archived accounts live on the Accounts page).
+  const manualAccounts = useMemo(() => getActiveManualAccounts(state.accounts || []), [state.accounts]);
   const accountStats = manualAccounts.map((account) =>
     getAccountStats(account, state.trades || [], state.settings)
   );

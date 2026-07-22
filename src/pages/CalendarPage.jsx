@@ -12,6 +12,7 @@ import {
   getBotAccounts,
   getStrategyAt,
   getAllStrategyNames,
+  tradeInAccountWindow,
 } from '../lib/store'
 
 const WEEKDAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -80,7 +81,11 @@ export default function CalendarPage({ state, openEditTrade }) {
   const [instrument, setInstrument] = useState(null)
 
   const allAccounts = state.accounts || []
-  const manualAccounts = useMemo(() => getManualAccounts(allAccounts), [allAccounts])
+  // All manual accounts (archived included, sorted last) so history stays filterable
+  const manualAccounts = useMemo(
+    () => getManualAccounts(allAccounts).sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0)),
+    [allAccounts]
+  )
   const botAccounts = useMemo(() => getBotAccounts(allAccounts), [allAccounts])
   const assignments = state.strategyAssignments || []
   const strategyNames = useMemo(() => getAllStrategyNames(assignments), [assignments])
@@ -91,7 +96,7 @@ export default function CalendarPage({ state, openEditTrade }) {
     if (next === 'manual') { setStrategy(null) }
     // If the selected account is the wrong kind for the new source, clear it
     if (accountId != null) {
-      const acct = allAccounts.find(a => a.id === accountId)
+      const acct = allAccounts.find(a => String(a.id) === String(accountId))
       const acctKind = acct?.kind || 'manual'
       if ((next === 'manual' && acctKind !== 'manual') || (next === 'bot' && acctKind !== 'bot')) {
         setAccountId(null)
@@ -102,11 +107,19 @@ export default function CalendarPage({ state, openEditTrade }) {
   // ── Manual-trade filtering ──
   // A manual trade contributes if at least one entry matches the active filters.
   // Entry-level filtering lets us also compute partial-account PnL correctly.
+  // Manual accounts are generational: an account owns an entry when the slots
+  // match AND the trade date falls in the account's active window. IDs are
+  // compared as strings because legacy accounts have numeric ids while the
+  // <select> yields strings.
+  const selectedManualAccount = accountId != null
+    ? manualAccounts.find(a => String(a.id) === String(accountId)) || null
+    : null
   const manualEntryMatches = (trade, e) => {
     if (!e.triggered) return false
     if (accountId != null) {
-      const acct = manualAccounts.find(a => a.slot === e.slot)
-      if (!acct || acct.id !== accountId) return false
+      if (!selectedManualAccount) return false
+      if (e.slot !== selectedManualAccount.slot) return false
+      if (!tradeInAccountWindow(selectedManualAccount, trade)) return false
     }
     if (instrument && trade.instrument !== instrument) return false
     return true
@@ -115,9 +128,9 @@ export default function CalendarPage({ state, openEditTrade }) {
     if (source === 'bot') return false
     if (instrument && trade.instrument !== instrument) return false
     if (accountId != null) {
-      const acct = manualAccounts.find(a => a.id === accountId)
-      if (!acct) return false
-      return trade.entries.some(e => e.triggered && e.slot === acct.slot)
+      if (!selectedManualAccount) return false
+      if (!tradeInAccountWindow(selectedManualAccount, trade)) return false
+      return trade.entries.some(e => e.triggered && e.slot === selectedManualAccount.slot)
     }
     return trade.entries.some(e => e.triggered)
   }
@@ -362,7 +375,7 @@ export default function CalendarPage({ state, openEditTrade }) {
         >
           <option value="">All accounts</option>
           {eligibleAccounts.map(a => (
-            <option key={a.id} value={a.id}>{a.name}{a.kind === 'bot' ? ' (bot)' : ''}</option>
+            <option key={a.id} value={a.id}>{a.name}{a.kind === 'bot' ? ' (bot)' : ''}{a.archived ? ' (archived)' : ''}</option>
           ))}
         </select>
 

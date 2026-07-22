@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCw, AlertCircle, CheckCircle, TrendingUp, Shield, Bot, Plus, Repeat, History, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCw, AlertCircle, CheckCircle, TrendingUp, Shield, Bot, Plus, Repeat, History, X, ChevronDown, ChevronUp, Archive, ArchiveRestore } from 'lucide-react';
 import {
   getAccountStats,
   HEALTH_STATUSES,
@@ -8,6 +8,9 @@ import {
   ENTRY_COLORS,
   getManualAccounts,
   getBotAccounts,
+  getActiveManualAccounts,
+  getArchivedManualAccounts,
+  createManualAccount,
   createBotAccount,
   getBotAccountStats,
   getActiveAssignment,
@@ -17,11 +20,16 @@ import {
   BROKER_LABEL,
 } from '../lib/store';
 
+// Keyed by numeric slot (1/2/3). normalizeSlot() also tolerates legacy 'E1'
+// string values that an older SlotSelector could have written.
 const SLOT_COLORS = {
-  E1: '#22c55e', // green
-  E2: '#f97316', // orange
-  E3: '#14b8a6', // teal
+  1: '#22c55e', // green
+  2: '#f97316', // orange
+  3: '#14b8a6', // teal
 };
+
+const normalizeSlot = (slot) => Number(String(slot).replace(/^E/i, '')) || null;
+const slotLabel = (slot) => (normalizeSlot(slot) ? `E${normalizeSlot(slot)}` : '—');
 
 const HEALTH_COLOR_MAP = {
   Eval: '#3b82f6',
@@ -35,7 +43,7 @@ const HEALTH_COLOR_MAP = {
 const AccountAccentBar = ({ slot }) => (
   <div
     className="absolute left-0 top-4 bottom-4 w-1 rounded-r"
-    style={{ backgroundColor: SLOT_COLORS[slot] || '#9ca3af' }}
+    style={{ backgroundColor: SLOT_COLORS[normalizeSlot(slot)] || '#9ca3af' }}
   />
 );
 
@@ -88,32 +96,38 @@ const ProgressBar = ({ percentage, label, color = '#22c55e' }) => (
   </div>
 );
 
-const SlotSelector = ({ value, onChange, label }) => {
-  const slots = ['E1', 'E2', 'E3'];
+const SlotSelector = ({ value, onChange, label, takenSlots = [] }) => {
+  const slots = [1, 2, 3];
+  const current = normalizeSlot(value);
 
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-gray-400">{label}</label>
       <div className="flex gap-2">
-        {slots.map((slot) => (
-          <motion.button
-            key={slot}
-            onClick={() => onChange(slot)}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              value === slot
-                ? 'text-white keep-white'
-                : 'bg-transparent text-gray-400 hover:text-gray-200'
-            }`}
-            style={{
-              backgroundColor: value === slot ? SLOT_COLORS[slot] : 'transparent',
-              border: `1px solid ${value === slot ? SLOT_COLORS[slot] : 'var(--border)'}`,
-            }}
-          >
-            {slot}
-          </motion.button>
-        ))}
+        {slots.map((slot) => {
+          const taken = takenSlots.includes(slot) && slot !== current;
+          return (
+            <motion.button
+              key={slot}
+              onClick={() => !taken && onChange(slot)}
+              whileHover={taken ? undefined : { scale: 1.05 }}
+              whileTap={taken ? undefined : { scale: 0.95 }}
+              disabled={taken}
+              title={taken ? 'Slot in use by another active account' : undefined}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                current === slot
+                  ? 'text-white keep-white'
+                  : 'bg-transparent text-gray-400 hover:text-gray-200'
+              } ${taken ? 'opacity-30 cursor-not-allowed' : ''}`}
+              style={{
+                backgroundColor: current === slot ? SLOT_COLORS[slot] : 'transparent',
+                border: `1px solid ${current === slot ? SLOT_COLORS[slot] : 'var(--border)'}`,
+              }}
+            >
+              {`E${slot}`}
+            </motion.button>
+          );
+        })}
       </div>
     </div>
   );
@@ -221,11 +235,11 @@ const EditableField = ({ value, onChange, label, type = 'text', prefix = '' }) =
   );
 };
 
-const AccountCard = ({ account, onUpdate, settings, trades }) => {
+const AccountCard = ({ account, onUpdate, onArchive, settings, trades, takenSlots }) => {
   const stats = getAccountStats(account, trades || [], settings);
 
   const handleSlotChange = (newSlot) => {
-    const oldSlot = account.slot;
+    const oldSlot = normalizeSlot(account.slot);
     const updatedAccount = {
       ...account,
       slot: newSlot,
@@ -280,7 +294,12 @@ const AccountCard = ({ account, onUpdate, settings, trades }) => {
           value={account.slot}
           onChange={handleSlotChange}
           label="Slot Assignment"
+          takenSlots={takenSlots}
         />
+
+        {account.activeFrom && (
+          <div className="text-[11px] text-gray-500">Active since {account.activeFrom}</div>
+        )}
 
         {/* Health Status */}
         <div>
@@ -349,8 +368,192 @@ const AccountCard = ({ account, onUpdate, settings, trades }) => {
             </div>
           </div>
         </div>
+
+        {onArchive && (
+          <button
+            onClick={() => {
+              if (confirm(`Archive "${account.name}"? Its trades and stats are kept for history, and its slot frees up for a new account.`)) {
+                onArchive(account);
+              }
+            }}
+            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-orange-400 border-0 bg-transparent cursor-pointer p-0"
+          >
+            <Archive size={11} />
+            Archive account
+          </button>
+        )}
       </div>
     </motion.div>
+  );
+};
+
+const AddManualAccountModal = ({ takenSlots, onSave, onClose }) => {
+  const freeSlots = [1, 2, 3].filter(s => !takenSlots.includes(s));
+  const [name, setName] = useState('');
+  const [slot, setSlot] = useState(freeSlots[0] || null);
+  const [startingPnl, setStartingPnl] = useState('0');
+
+  const canSave = name.trim() && slot != null;
+
+  const handleSave = () => {
+    if (!canSave) return;
+    onSave({ name: name.trim(), slot, startingPnl: parseFloat(startingPnl) || 0 });
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+        className="w-full max-w-md rounded-2xl border p-6"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <RefreshCw size={18} className="text-blue-400" />
+            Add Risk-Sink Account
+          </h3>
+          <button onClick={onClose} className="p-1 border-0 bg-transparent cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Account name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Topstep 50k #2"
+              autoFocus
+              className="w-full px-3 py-2 rounded-xl border text-white"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            />
+          </div>
+
+          <SlotSelector
+            value={slot}
+            onChange={setSlot}
+            label="Slot Assignment"
+            takenSlots={takenSlots}
+          />
+          {freeSlots.length === 0 && (
+            <div className="text-[11px] text-orange-400">
+              All 3 slots are taken — archive an account first to free one up.
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5">Starting P&L</label>
+            <div className="flex items-center">
+              <span className="text-gray-400 mr-2">$</span>
+              <input
+                type="number"
+                value={startingPnl}
+                onChange={(e) => setStartingPnl(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-xl border text-white"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+              />
+            </div>
+            <div className="text-[11px] text-gray-500 mt-1">
+              Leave at $0 for a fresh account. Only trades logged from today forward count toward it.
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border text-sm cursor-pointer"
+            style={{ background: 'transparent', borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-white keep-white border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: 'var(--blue)' }}
+          >
+            Add
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+const ArchivedAccountsSection = ({ archivedAccounts, trades, settings, onUnarchive, activeSlots }) => {
+  const [open, setOpen] = useState(false);
+  if (archivedAccounts.length === 0) return null;
+
+  return (
+    <div className="mb-8">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 text-sm text-gray-400 hover:text-white border-0 bg-transparent cursor-pointer p-0 mb-4"
+      >
+        <Archive size={14} />
+        Archived Accounts ({archivedAccounts.length})
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-2">
+              {archivedAccounts.map((a) => {
+                const stats = getAccountStats(a, trades || [], settings);
+                const slotFree = !activeSlots.includes(normalizeSlot(a.slot));
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-4 p-4 rounded-xl border"
+                    style={{ background: 'var(--card)', borderColor: 'var(--border)', opacity: 0.85 }}
+                  >
+                    <div className="w-1 self-stretch rounded" style={{ backgroundColor: SLOT_COLORS[normalizeSlot(a.slot)] || '#9ca3af' }} />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">{a.name}</div>
+                      <div className="text-[11px] text-gray-500">
+                        {slotLabel(a.slot)}
+                        {a.activeFrom ? ` · from ${a.activeFrom}` : ''}
+                        {a.archivedAt ? ` · archived ${a.archivedAt.slice(0, 10)}` : ''}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[11px] text-gray-500">Final P&L</div>
+                      <div className="text-sm font-semibold" style={{ color: (stats.totalPnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        ${(stats.totalPnl || 0).toFixed(2)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onUnarchive(a)}
+                      disabled={!slotFree}
+                      title={slotFree ? 'Restore this account' : 'Its slot is used by an active account'}
+                      className="flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg border cursor-pointer bg-transparent disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                    >
+                      <ArchiveRestore size={11} />
+                      Unarchive
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 
@@ -1022,23 +1225,23 @@ const AccountHistory = ({ accounts }) => {
             className="flex items-center gap-4 p-3 rounded-lg"
             style={{ backgroundColor: 'var(--surface)' }}
           >
-            <div className="flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: SLOT_COLORS[entry.to] }} />
+            <div className="flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: SLOT_COLORS[normalizeSlot(entry.to)] }} />
             <div className="flex-1">
               <div className="text-sm text-white">
                 <span className="font-medium">{entry.accountName}</span>
                 {' moved from '}
                 <span
                   className="font-semibold"
-                  style={{ color: SLOT_COLORS[entry.from] }}
+                  style={{ color: SLOT_COLORS[normalizeSlot(entry.from)] }}
                 >
-                  {entry.from}
+                  {slotLabel(entry.from)}
                 </span>
                 {' to '}
                 <span
                   className="font-semibold"
-                  style={{ color: SLOT_COLORS[entry.to] }}
+                  style={{ color: SLOT_COLORS[normalizeSlot(entry.to)] }}
                 >
-                  {entry.to}
+                  {slotLabel(entry.to)}
                 </span>
               </div>
               <div className="text-xs text-gray-400 mt-1">
@@ -1053,14 +1256,31 @@ const AccountHistory = ({ accounts }) => {
 };
 
 const Accounts = ({ state, updateAccounts, updateSettings, switchStrategy }) => {
-  const manualAccounts = getManualAccounts(state.accounts);
+  const [addOpen, setAddOpen] = useState(false);
+  const manualAccounts = getActiveManualAccounts(state.accounts);
+  const archivedAccounts = getArchivedManualAccounts(state.accounts);
   const botAccounts = getBotAccounts(state.accounts);
+  const activeSlots = manualAccounts.map(a => normalizeSlot(a.slot)).filter(Boolean);
 
   const handleAccountUpdate = (updatedAccount) => {
     const updatedAccounts = state.accounts.map((acc) =>
       acc.id === updatedAccount.id ? updatedAccount : acc
     );
     updateAccounts(updatedAccounts);
+  };
+
+  const handleAddManualAccount = (input) => {
+    const newAccount = createManualAccount(input);
+    updateAccounts([...state.accounts, newAccount]);
+  };
+
+  const handleArchiveAccount = (account) => {
+    handleAccountUpdate({ ...account, archived: true, archivedAt: new Date().toISOString() });
+  };
+
+  const handleUnarchiveAccount = (account) => {
+    const { archived, archivedAt, ...rest } = account;
+    handleAccountUpdate(rest);
   };
 
   const handleAddBotAccount = (input) => {
@@ -1086,23 +1306,65 @@ const Accounts = ({ state, updateAccounts, updateSettings, switchStrategy }) => 
 
       {/* Manual Account Cards Grid (E1/E2/E3) */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-          <RefreshCw size={20} />
-          Risk-Sink Accounts
-          <span className="text-sm text-gray-400 font-normal">({manualAccounts.length})</span>
-        </h2>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {manualAccounts.map((account) => (
-            <AccountCard
-              key={account.id}
-              account={account}
-              trades={state.trades}
-              onUpdate={handleAccountUpdate}
-              settings={state.settings}
-            />
-          ))}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <RefreshCw size={20} />
+            Risk-Sink Accounts
+            <span className="text-sm text-gray-400 font-normal">({manualAccounts.length})</span>
+          </h2>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white keep-white border-0 cursor-pointer"
+            style={{ background: 'var(--blue)' }}
+          >
+            <Plus size={14} />
+            Add Account
+          </button>
         </div>
+        {manualAccounts.length === 0 ? (
+          <div
+            className="rounded-xl border border-dashed p-8 text-center"
+            style={{ borderColor: 'var(--border)', background: 'var(--card)' }}
+          >
+            <RefreshCw size={28} className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
+            <div className="text-sm text-gray-400">No active risk-sink accounts</div>
+            <div className="text-xs text-gray-500 mt-1">Add one to start the E1/E2/E3 rotation.</div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {manualAccounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                account={account}
+                trades={state.trades}
+                onUpdate={handleAccountUpdate}
+                onArchive={handleArchiveAccount}
+                settings={state.settings}
+                takenSlots={activeSlots}
+              />
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Archived risk-sink accounts (kept for history) */}
+      <ArchivedAccountsSection
+        archivedAccounts={archivedAccounts}
+        trades={state.trades}
+        settings={state.settings}
+        onUnarchive={handleUnarchiveAccount}
+        activeSlots={activeSlots}
+      />
+
+      <AnimatePresence>
+        {addOpen && (
+          <AddManualAccountModal
+            takenSlots={activeSlots}
+            onSave={handleAddManualAccount}
+            onClose={() => setAddOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Bot Accounts */}
       <BotAccountsSection
