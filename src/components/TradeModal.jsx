@@ -106,13 +106,18 @@ function EntryRow({ slot, entry, onChange }) {
             ))}
           </div>
           <div className="flex-1">
+            {/* R only applies to wins — losses are fixed at -1R and BE at 0R
+                in the stats, so the input is disabled there instead of
+                silently storing a number that's never used. */}
             <input
               type="number"
               step="0.1"
-              placeholder="R"
-              value={entry.r || ''}
+              placeholder={entry.result === 'L' ? '-1R fixed' : entry.result === 'BE' ? '0R fixed' : 'R'}
+              disabled={entry.result === 'L' || entry.result === 'BE'}
+              title={entry.result === 'L' ? 'Losses always count as -1R' : entry.result === 'BE' ? 'Break-evens always count as 0R' : 'Realized R multiple'}
+              value={entry.result === 'L' || entry.result === 'BE' ? '' : (entry.r || '')}
               onChange={e => onChange({ ...entry, r: parseFloat(e.target.value) || 0 })}
-              className="w-full px-2 py-1.5 rounded-lg text-sm font-mono outline-none"
+              className="w-full px-2 py-1.5 rounded-lg text-sm font-mono outline-none disabled:opacity-40"
               style={{ background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' }}
             />
           </div>
@@ -289,13 +294,24 @@ function TagSection({ label, options, selected, onToggle, color, customTags, onA
 // ═══════════════════════════════════════════════════
 
 export default function TradeModal({ trade, onSave, onClose, customTags = {}, onAddCustomTag }) {
-  const initTrade = trade || createTrade()
-  // Ensure tags structure exists for older trades (riskSinkStyles added in v2)
-  if (!initTrade.tags) initTrade.tags = { mistakes: [], conditions: [], confirmations: [], riskSinkStyles: [] }
-  if (!initTrade.tags.riskSinkStyles) initTrade.tags.riskSinkStyles = []
-  if (!initTrade.notes) initTrade.notes = ''
-
-  const [form, setForm] = useState(initTrade)
+  // Lazy initializer, built immutably: the old version mutated the parent's
+  // trade object during render (backfilling tags/notes in place, even on
+  // cancel) and called createTrade() — new UUID and all — every render.
+  const [form, setForm] = useState(() => {
+    const base = trade ? { ...trade } : createTrade()
+    return {
+      ...base,
+      notes: base.notes || '',
+      // Ensure tag structure exists for older trades (riskSinkStyles added in v2)
+      tags: {
+        mistakes: [],
+        conditions: [],
+        confirmations: [],
+        ...(base.tags || {}),
+        riskSinkStyles: base.tags?.riskSinkStyles || [],
+      },
+    }
+  })
   const [activeSection, setActiveSection] = useState('info') // 'info' | 'entries' | 'journal' | 'tags'
 
   // Close on Escape key
@@ -322,7 +338,23 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
   }
 
   const handleSave = () => {
-    if (!form.date) return
+    if (!form.date) {
+      alert('Pick a date before saving.')
+      return
+    }
+    // Data-quality guard: these mistakes used to save silently and quietly
+    // corrupt the stats (a W with no R counts as a 0R win; a triggered entry
+    // with no result is invisible to every calculation).
+    const issues = []
+    for (const e of form.entries || []) {
+      if (e.triggered && !e.result) {
+        issues.push(`${ENTRY_LABELS[e.slot]} is triggered but has no W/L/BE result — it won't count in any stats yet.`)
+      }
+      if (e.triggered && e.result === 'W' && !(e.r > 0)) {
+        issues.push(`${ENTRY_LABELS[e.slot]} is a WIN with no R value — it would count as a 0R win and drag your stats down.`)
+      }
+    }
+    if (issues.length > 0 && !confirm(`Heads up:\n\n• ${issues.join('\n• ')}\n\nSave anyway?`)) return
     onSave(form)
   }
 

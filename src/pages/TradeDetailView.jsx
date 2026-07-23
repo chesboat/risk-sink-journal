@@ -299,6 +299,10 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
                           </span>
                         )}
                       </div>
+                    ) : entry.triggered ? (
+                      // Triggered but no result yet — a live/pending entry,
+                      // not the same thing as one that never fired.
+                      <span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: 'var(--blue-dim)', color: 'var(--accent)' }}>OPEN</span>
                     ) : (
                       <span className="text-xs" style={{ color: 'var(--text-dim)', opacity: 0.4 }}>Not triggered</span>
                     )}

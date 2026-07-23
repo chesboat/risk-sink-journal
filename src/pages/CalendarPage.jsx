@@ -226,6 +226,9 @@ export default function CalendarPage({ state, openEditTrade }) {
       let pnl = 0
       let tradeDays = 0
       week.forEach(dayObj => {
+        // Skip previous/next-month padding cells so the weekly sidebar
+        // totals reconcile with the Monthly badge (which is month-only)
+        if (!dayObj.inMonth) return
         const s = getDayStats(dayObj)
         if (!s) return
         tradeDays++

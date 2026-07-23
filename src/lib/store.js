@@ -502,6 +502,11 @@ export function calcStats(trades, period = 'all') {
 
   const allEntries = filtered.flatMap(t => t.entries.filter(e => e.triggered && e.result));
   const entryWins = allEntries.filter(e => e.result === 'W');
+  const entryLosses = allEntries.filter(e => e.result === 'L');
+  const entryBEs = allEntries.filter(e => e.result === 'BE');
+  // Entry WR is W/(W+L) — break-evens are excluded from the denominator,
+  // matching the per-slot wr in byEntry so every page shows the same number.
+  const decisiveEntries = entryWins.length + entryLosses.length;
 
   const totalR = filtered.reduce((s, t) => s + getNetR(t), 0);
   const totalPnl = filtered.reduce((s, t) => s + getNetPnl(t), 0);
@@ -568,7 +573,8 @@ export function calcStats(trades, period = 'all') {
     currentStreak = last === 'WIN' ? cnt : -cnt;
   }
 
-  // By emotion
+  // By emotion — pnl sums COMPLETED trades only, matching the `trades` count
+  // so downstream per-trade averages (pnl / trades) aren't skewed by pending ideas.
   const byEmotion = EMOTIONS.map(emotion => {
     const emotionTrades = filtered.filter(t => t.emotion === emotion);
     const completed = emotionTrades.filter(t => getIdeaResult(t) !== null);
@@ -577,7 +583,7 @@ export function calcStats(trades, period = 'all') {
       emotion,
       trades: completed.length,
       wr: completed.length > 0 ? emotionWins.length / completed.length : 0,
-      pnl: emotionTrades.reduce((s, t) => s + getNetPnl(t), 0),
+      pnl: completed.reduce((s, t) => s + getNetPnl(t), 0),
     };
   }).filter(e => e.trades > 0);
 
@@ -601,7 +607,9 @@ export function calcStats(trades, period = 'all') {
     ideaWR: completedTrades.length > 0 ? wins.length / completedTrades.length : 0,
     totalEntries: allEntries.length,
     entryWins: entryWins.length,
-    entryWR: allEntries.length > 0 ? entryWins.length / allEntries.length : 0,
+    entryLosses: entryLosses.length,
+    entryBEs: entryBEs.length,
+    entryWR: decisiveEntries > 0 ? entryWins.length / decisiveEntries : 0,
     totalR,
     totalPnl,
     byEntry,
@@ -834,7 +842,8 @@ export function calcPooledHealth(trades, accounts, settings) {
     (s, a) => s + Math.max(0, Math.min(perAccountMll, a.mllDistance)),
     0
   )
-  const pooledHeadroomPct = (pooledHeadroom / pooledMll) * 100
+  // Guard: with zero active accounts pooledMll is 0 — report 0% not NaN
+  const pooledHeadroomPct = pooledMll > 0 ? (pooledHeadroom / pooledMll) * 100 : 0
   const combinedMllUsed = pooledMll - pooledHeadroom
   const combinedMllLeft = pooledHeadroom
 
@@ -927,7 +936,7 @@ export function calcPooledHealth(trades, accounts, settings) {
       maxDdPeakAt = peakDate
     }
   })
-  const maxDdPctOfPool = (maxDd / pooledMll) * 100
+  const maxDdPctOfPool = pooledMll > 0 ? (maxDd / pooledMll) * 100 : 0
   const currentCombinedPeak = peak
   const currentCombinedPeakAt = peakDate
 
@@ -1123,7 +1132,9 @@ export function formatCurrency(n) {
 }
 
 export function formatPnl(n) {
-  return n >= 0 ? `+$${n.toFixed(0)}` : `-$${Math.abs(n).toFixed(0)}`;
+  // toFixed can round -0.4 to "-0"; treat anything that rounds to zero as flat
+  if (Math.abs(n) < 0.5) return '$0';
+  return n > 0 ? `+$${n.toFixed(0)}` : `-$${Math.abs(n).toFixed(0)}`;
 }
 
 // ═══════════════════════════════════════════════════

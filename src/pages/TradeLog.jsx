@@ -138,8 +138,9 @@ export default function TradeLog({
     }
 
     if (selectedResult !== 'all') {
+      // 'open' selects ideas with no result yet (getIdeaResult returns null)
       filtered = filtered.filter(
-        (trade) => getIdeaResult(trade) === selectedResult
+        (trade) => getIdeaResult(trade) === (selectedResult === 'open' ? null : selectedResult)
       );
     }
 
@@ -271,18 +272,20 @@ export default function TradeLog({
     );
   };
 
-  // Result tag rendering
+  // Result tag rendering — BE and still-open ideas get their own styling
+  // instead of falling through to the red LOSS look.
   const renderResultTag = (trade) => {
     const result = getIdeaResult(trade);
+    const style = result === 'WIN'
+      ? { background: 'var(--green-dim)', color: 'var(--green)' }
+      : result === 'LOSS'
+        ? { background: 'var(--red-dim)', color: 'var(--red)' }
+        : result === 'BE'
+          ? { background: 'var(--surface)', color: 'var(--text-dim)' }
+          : { background: 'var(--blue-dim)', color: 'var(--accent)' };
     return (
-      <span
-        className="rounded-md px-2 py-0.5 text-xs font-medium"
-        style={{
-          background: result === 'WIN' ? 'var(--green-dim)' : 'var(--red-dim)',
-          color: result === 'WIN' ? 'var(--green)' : 'var(--red)',
-        }}
-      >
-        {result}
+      <span className="rounded-md px-2 py-0.5 text-xs font-medium" style={style}>
+        {result || 'OPEN'}
       </span>
     );
   };
@@ -500,14 +503,14 @@ export default function TradeLog({
                 Result
               </label>
               <div className="flex gap-2">
-                {['all', 'WIN', 'LOSS'].map((res) => (
+                {['all', 'WIN', 'LOSS', 'BE', 'open'].map((res) => (
                   <button
                     key={res}
                     onClick={() => setSelectedResult(res)}
                     className="px-3 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer"
                     style={chipStyle(selectedResult === res)}
                   >
-                    {res}
+                    {res === 'open' ? 'OPEN' : res}
                   </button>
                 ))}
               </div>

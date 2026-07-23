@@ -133,17 +133,19 @@ const StatCard = ({
 const RiskScoreCard = ({ score, breakdown }) => {
   const [showInfo, setShowInfo] = useState(false);
 
+  // Bands mirror calcRiskScore's labels in store.js — color, grade word, and
+  // the info tooltip all describe the same thresholds.
   const getScoreColor = (s) => {
-    if (s > 65) return 'var(--green)';
-    if (s < 35) return 'var(--red)';
-    return 'var(--orange)';
+    if (s >= 65) return 'var(--green)';
+    if (s >= 35) return 'var(--orange)';
+    return 'var(--red)';
   };
 
   const getScoreGrade = (s) => {
-    if (s > 85) return 'Excellent';
-    if (s > 70) return 'Good';
-    if (s > 50) return 'Fair';
-    if (s > 35) return 'Poor';
+    if (s >= 80) return 'Elite';
+    if (s >= 65) return 'Strong';
+    if (s >= 50) return 'Developing';
+    if (s >= 35) return 'Needs Work';
     return 'Critical';
   };
 
@@ -190,7 +192,7 @@ const RiskScoreCard = ({ score, breakdown }) => {
             <p><span className="font-mono font-semibold">20%</span> — Consistency: even distribution of R across trades (low variance)</p>
             <p><span className="font-mono font-semibold">15%</span> — Emotion Quality: absence of revenge trades, FOMO entries, and tilt</p>
           </div>
-          <p className="mt-2" style={{ opacity: 0.6 }}>Score ranges: 85+ Excellent · 70+ Good · 50+ Fair · 35+ Poor · &lt;35 Critical</p>
+          <p className="mt-2" style={{ opacity: 0.6 }}>Score ranges: 80+ Elite · 65+ Strong · 50+ Developing · 35+ Needs Work · &lt;35 Critical</p>
         </motion.div>
       )}
 
@@ -504,12 +506,13 @@ const AccountHealthCard = ({ account, stats }) => {
 // Mini Calendar Component
 const MINI_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-const MiniCalendar = ({ trades }) => {
+const MiniCalendar = ({ trades, botTrades }) => {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
 
-  // Build daily PnL map (all trades, since 2-week view can span months)
+  // Build daily PnL map (all trades, since 2-week view can span months).
+  // Includes bot fills so a day's total matches the Calendar page.
   const dailyPnl = useMemo(() => {
     const map = {};
     (trades || []).forEach(t => {
@@ -520,8 +523,15 @@ const MiniCalendar = ({ trades }) => {
         if (e.triggered && e.result) map[t.date].entries.push(e);
       });
     });
+    (botTrades || []).forEach(bt => {
+      const d = new Date(bt.exit_ts);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!map[key]) map[key] = { pnl: 0, count: 0, entries: [] };
+      map[key].pnl += (Number(bt.pnl) || 0) - (Number(bt.fees) || 0);
+      map[key].count++;
+    });
     return map;
-  }, [trades]);
+  }, [trades, botTrades]);
 
   // Build 2-week grid: previous week + current week (Mon-Sun)
   const twoWeeks = useMemo(() => {
@@ -554,9 +564,6 @@ const MiniCalendar = ({ trades }) => {
   const today = now.getDate();
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
   const monthLabel = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-  const prev = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
-  const next = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
 
   const shortPnl = (v) => {
     const abs = Math.abs(v);
@@ -892,11 +899,13 @@ export default function Dashboard({ state, openEditTrade }) {
   const stats = calcStats(state.trades || [], periodMap[period] || 'month');
   const riskScore = calcRiskScore(state.trades || [], state.accounts || [], state.settings);
 
-  // Calculate entry performance from stats.byEntry
+  // Entry performance from stats.byEntry. `total` is decisive entries (W+L,
+  // break-evens excluded) so the WR here matches byEntry.wr and Analytics.
+  const decisive = (e) => (e?.wins || 0) + (e?.losses || 0);
   const entryPerformance = {
-    E1: { wins: (stats.byEntry?.[0]?.wins || 0), total: (stats.byEntry?.[0]?.trades || 0) },
-    E2: { wins: (stats.byEntry?.[1]?.wins || 0), total: (stats.byEntry?.[1]?.trades || 0) },
-    E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: (stats.byEntry?.[2]?.trades || 0) },
+    E1: { wins: (stats.byEntry?.[0]?.wins || 0), total: decisive(stats.byEntry?.[0]) },
+    E2: { wins: (stats.byEntry?.[1]?.wins || 0), total: decisive(stats.byEntry?.[1]) },
+    E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: decisive(stats.byEntry?.[2]) },
   };
 
   // Active manual accounts only for the risk-sink stats panels below (bot
@@ -906,11 +915,13 @@ export default function Dashboard({ state, openEditTrade }) {
     getAccountStats(account, state.trades || [], state.settings)
   );
 
-  // Compute week-over-week change for idea WR
+  // This week's idea WR vs the selected period's average. Hidden when the
+  // period IS the week (comparing a number to itself said nothing).
   const weekStats = calcStats(state.trades || [], 'week');
   const weekWrPct = (weekStats.ideaWR || 0) * 100;
-  const monthWrPct = (stats.ideaWR || 0) * 100;
-  const wrDiff = weekWrPct - monthWrPct;
+  const periodWrPct = (stats.ideaWR || 0) * 100;
+  const wrDiff = period === 'Week' ? 0 : weekWrPct - periodWrPct;
+  const wrDiffLabel = period === 'All Time' ? 'vs all-time avg' : 'vs month avg';
 
   // Period label for subtitles
   const periodLabel = period === 'Week' ? 'this week' : period === 'Month' ? new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'all time';
@@ -960,7 +971,7 @@ export default function Dashboard({ state, openEditTrade }) {
             value={ideaWr}
             suffix="%"
             valueColor="var(--green)"
-            subtitle={wrDiff !== 0 ? `${wrDiff > 0 ? '↑' : '↓'} ${Math.abs(wrDiff).toFixed(1)}% this week` : undefined}
+            subtitle={wrDiff !== 0 ? `this week ${wrDiff > 0 ? '↑' : '↓'} ${Math.abs(wrDiff).toFixed(1)}% ${wrDiffLabel}` : undefined}
             subtitleColor={wrDiff >= 0 ? 'var(--green)' : 'var(--red)'}
             fullHeight
           />
@@ -1033,7 +1044,7 @@ export default function Dashboard({ state, openEditTrade }) {
       </div>
 
       {/* Row 4: Mini Calendar (full width) */}
-      <MiniCalendar trades={state.trades} />
+      <MiniCalendar trades={state.trades} botTrades={state.botTrades} />
 
       {/* Row 5: Recent Trades (full width) */}
       <RecentTradesList trades={state.trades} onEditTrade={openEditTrade} />

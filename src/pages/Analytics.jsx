@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, AreaChart, Area, ReferenceLine, ComposedChart } from 'recharts'
 import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
-import { calcStats, calcPooledHealth, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
+import { calcStats, calcPooledHealth, getIdeaResult, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
 const COLORS = {
   green: '#30d158',
@@ -42,9 +42,11 @@ export default function Analytics({ state }) {
   // TAB 1: OVERVIEW
   // ════════════════════════════════════════════════════════════════════════
   const OverviewTab = () => {
-    // R distribution histogram
+    // R distribution histogram — only ideas that were actually traded to a
+    // result. Untriggered / still-open ideas used to land in the '0' bucket
+    // and masquerade as break-evens.
     const rBuckets = { '-3': 0, '-2': 0, '-1': 0, '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5+': 0 }
-    state.trades.forEach(t => {
+    state.trades.filter(t => t.entries.some(e => e.triggered && e.result)).forEach(t => {
       const r = Math.round(t.entries.reduce((s, e) => {
         if (!e.triggered) return s
         if (e.result === 'W') return s + (e.r || 0)
@@ -72,10 +74,13 @@ export default function Analytics({ state }) {
       pnl: d.daily,
     }))
 
-    // Profit factor: sum of winning days / absolute value of losing days
-    const winningDays = stats.equityCurve.filter(d => d.daily > 0).reduce((s, d) => s + d.daily, 0)
-    const losingDays = Math.abs(stats.equityCurve.filter(d => d.daily < 0).reduce((s, d) => s + d.daily, 0))
-    const profitFactor = losingDays > 0 ? (winningDays / losingDays).toFixed(2) : (winningDays > 0 ? '∞' : '0')
+    // Profit factor (standard definition): gross winning entry P&L divided by
+    // gross losing entry P&L. The old version divided winning DAYS by losing
+    // DAYS, which is a different (and unlabeled) statistic.
+    const triggeredEntries = state.trades.flatMap(t => (t.entries || []).filter(e => e.triggered))
+    const grossWin = triggeredEntries.reduce((s, e) => s + Math.max(0, e.pnl || 0), 0)
+    const grossLoss = Math.abs(triggeredEntries.reduce((s, e) => s + Math.min(0, e.pnl || 0), 0))
+    const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : (grossWin > 0 ? '∞' : '0')
 
     return (
       <div className="space-y-6">
@@ -108,7 +113,7 @@ export default function Analytics({ state }) {
               </div>
               <Zap size={24} className="opacity-50" style={{ color: COLORS.orange }} />
             </div>
-            <div className="text-xs text-white opacity-50">{stats.entryWins}W / {stats.totalEntries - stats.entryWins}L · {stats.totalEntries} entries</div>
+            <div className="text-xs text-white opacity-50">{stats.entryWins}W / {stats.entryLosses}L{stats.entryBEs > 0 ? ` / ${stats.entryBEs}BE` : ''} · {stats.totalEntries} entries</div>
           </motion.div>
         </div>
 
@@ -160,12 +165,12 @@ export default function Analytics({ state }) {
 
               <div className="font-semibold mb-2">Pooled MLL Headroom</div>
               <div className="opacity-70 mb-1">
-                Sum of each account's <span className="font-semibold">distance-to-bust</span> (current P&L minus its trailing MLL floor, capped at ${pooled.pooledMll / pooled.perAccount.length} per account). This is the total dollar drawdown the system can absorb before ANY single account busts — losses on one account don't rescue another's floor.
+                Sum of each account's <span className="font-semibold">distance-to-bust</span> (current P&L minus its trailing MLL floor, capped at ${pooled.perAccountMll} per account). This is the total dollar drawdown the system can absorb before ANY single account busts — losses on one account don't rescue another's floor.
               </div>
               <div className="font-mono opacity-60 mb-3">
                 {pooled.perAccount.map((a, i) => (
                   <span key={a.id}>
-                    {a.name} ${Math.round(Math.max(0, Math.min(pooled.pooledMll / pooled.perAccount.length, a.mllDistance))).toLocaleString()}
+                    {a.name} ${Math.round(Math.max(0, Math.min(pooled.perAccountMll, a.mllDistance))).toLocaleString()}
                     {i < pooled.perAccount.length - 1 ? '  +  ' : '  =  '}
                   </span>
                 ))}
@@ -175,7 +180,7 @@ export default function Analytics({ state }) {
 
               <div className="font-semibold mb-2">Trailing MLL (per account)</div>
               <div className="opacity-70 mb-2">
-                Each account's floor = min($0, peak P&L − ${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}). The floor trails $-for-$ with profit and locks at $0 once peak hits +${(pooled.pooledMll / pooled.perAccount.length).toLocaleString()}. Account busts the moment current P&L drops below its floor.
+                Each account's floor = min($0, peak P&L − ${pooled.perAccountMll.toLocaleString()}). The floor trails $-for-$ with profit and locks at $0 once peak hits +${pooled.perAccountMll.toLocaleString()}. Account busts the moment current P&L drops below its floor.
               </div>
               <div className="font-mono text-[11px] opacity-70 grid grid-cols-1 gap-0.5">
                 {pooled.perAccount.map((a) => (
@@ -675,8 +680,11 @@ export default function Analytics({ state }) {
       wrPercent: Math.round(s.wr * 100),
     }))
 
+    // Short labels must stay distinct — splitting on the first word collapsed
+    // "New York AM" and "New York PM" into two identical "New" bars.
+    const SESSION_SHORT = { 'New York AM': 'NY AM', 'New York PM': 'NY PM' }
     const chartData = sessionData.map(s => ({
-      name: s.session.split(' ')[0], // Just the first word for chart
+      name: SESSION_SHORT[s.session] || s.session,
       wr: Math.round(s.wr * 100),
       ideas: s.ideas,
     }))
@@ -836,12 +844,7 @@ export default function Analytics({ state }) {
         return triggered.length > 0 && triggered.some(e => e.result)
       })
       .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(t => {
-        const triggered = t.entries.filter(e => e.triggered)
-        if (triggered.some(e => e.result === 'W')) return 'WIN'
-        if (triggered.every(e => e.result === 'L')) return 'LOSS'
-        return null
-      })
+      .map(t => getIdeaResult(t))
       .filter(r => r !== null)
 
     const currentColor = stats.currentStreak > 0 ? COLORS.green : stats.currentStreak < 0 ? COLORS.red : '#888'
@@ -904,7 +907,7 @@ export default function Analytics({ state }) {
                   key={i}
                   className="w-4 h-4 rounded-full"
                   style={{
-                    background: result === 'WIN' ? COLORS.green : COLORS.red,
+                    background: result === 'WIN' ? COLORS.green : result === 'LOSS' ? COLORS.red : '#8e8e93',
                   }}
                   whileHover={{ scale: 1.3 }}
                   title={`Trade ${i + 1}: ${result}`}
@@ -923,9 +926,12 @@ export default function Analytics({ state }) {
   const EmotionsTab = () => {
     const emotionData = stats.byEmotion
 
-    // Find best emotion
-    const bestEmotion = emotionData.length > 0
-      ? emotionData.reduce((prev, current) => (prev.wr > current.wr ? prev : current))
+    // Find best emotion — require a minimum sample so one lucky "Revenge"
+    // trade can't be crowned the optimal state over 40 calm trades.
+    const MIN_EMOTION_SAMPLE = 3
+    const qualified = emotionData.filter(e => e.trades >= MIN_EMOTION_SAMPLE)
+    const bestEmotion = qualified.length > 0
+      ? qualified.reduce((prev, current) => (prev.wr > current.wr ? prev : current))
       : null
 
     const chartData = emotionData.map(e => ({
@@ -1074,20 +1080,21 @@ export default function Analytics({ state }) {
 // CUSTOM BAR SHAPE FOR P&L COLORING
 // ════════════════════════════════════════════════════════════════════════
 function CustomBar(props) {
-  const { fill, x, y, width, height, payload } = props
-  if (!payload) return null
-
-  const barColor = payload.pnl >= 0 ? '#30d158' : '#ff453a'
-  const barHeight = Math.abs((payload.pnl / (payload.pnl > 0 ? 5000 : 5000)) * height) || 0
-  const barY = payload.pnl >= 0 ? y + height - barHeight : y + height - barHeight
+  // Recharts already computed the correct geometry against the axis scale
+  // (for negative values the bar hangs below the zero line); this shape only
+  // overrides the fill so gains are green and losses red. The previous
+  // version recomputed height against a hardcoded $5k scale and anchored
+  // losses upward like gains, which drew both charts wrong.
+  const { x, y, width, height, payload } = props
+  if (!payload || !width || !height) return null
 
   return (
     <rect
       x={x}
-      y={barY}
+      y={height < 0 ? y + height : y}
       width={width}
-      height={barHeight}
-      fill={barColor}
+      height={Math.abs(height)}
+      fill={payload.pnl >= 0 ? '#30d158' : '#ff453a'}
       rx={4}
       ry={4}
     />
