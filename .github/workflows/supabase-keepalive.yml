@@ -1,0 +1,27 @@
+name: Supabase keep-alive
+
+# Free-tier Supabase pauses projects after ~1 week without API activity,
+# which took the journal down in July 2026. This pings the REST API three
+# times a week so the project always counts as active. The query touches
+# the config table (RLS returns zero rows to the anon role — that's fine,
+# reaching the database is what counts as activity).
+
+on:
+  schedule:
+    - cron: '17 6 * * 1,3,5' # Mon/Wed/Fri 06:17 UTC
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/config?select=user_id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          echo "Supabase responded with HTTP $code"
+          # 200 = awake; anything else fails the job so the repo owner
+          # gets GitHub's workflow-failure email (early pause warning).
+          [ "$code" = "200" ]

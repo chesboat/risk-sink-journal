@@ -114,8 +114,10 @@ export async function pullState(userId) {
   const trades = tradeRows ? tradeRows.map(r => r.data) : [];
   const accounts = configRow?.accounts || null;
   const settings = configRow?.settings || null;
+  // configUpdatedAt feeds the optimistic-concurrency check in pushConfigGuarded
+  const configUpdatedAt = configRow?.updated_at || null;
 
-  return { trades, botTrades, strategyAssignments, accounts, settings };
+  return { trades, botTrades, strategyAssignments, accounts, settings, configUpdatedAt };
 }
 
 // ── Push a single trade (upsert) ──
@@ -157,6 +159,45 @@ export async function pushConfig(accounts, settings, userId) {
   if (error) throw error;
 }
 
+// ── Push config with a concurrency guard ──
+// Writes only if the server row still has the updated_at we last pulled;
+// otherwise another device/tab wrote in between and blindly upserting would
+// clobber their change. Returns:
+//   { conflict: false, updatedAt }        → written, track the new stamp
+//   { conflict: true, remoteUpdatedAt }   → NOT written; re-pull and retry
+export async function pushConfigGuarded(accounts, settings, userId, expectedUpdatedAt) {
+  if (!supabase || !userId) return { conflict: false, updatedAt: null };
+  const now = new Date().toISOString();
+
+  if (expectedUpdatedAt) {
+    const { data, error } = await supabase
+      .from('config')
+      .update({ accounts, settings, updated_at: now })
+      .eq('user_id', userId)
+      .eq('updated_at', expectedUpdatedAt)
+      .select('updated_at');
+    if (error) throw error;
+    if (data && data.length > 0) return { conflict: false, updatedAt: data[0].updated_at };
+
+    // Nothing matched: the row moved under us (or was deleted). Find out which.
+    const { data: cur, error: curErr } = await supabase
+      .from('config')
+      .select('updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (curErr) throw curErr;
+    if (cur) return { conflict: true, remoteUpdatedAt: cur.updated_at };
+    // Row gone — fall through to insert below.
+  }
+
+  const { data: up, error: upErr } = await supabase
+    .from('config')
+    .upsert({ user_id: userId, accounts, settings, updated_at: now }, { onConflict: 'user_id' })
+    .select('updated_at');
+  if (upErr) throw upErr;
+  return { conflict: false, updatedAt: up?.[0]?.updated_at || now };
+}
+
 // ── Bulk push — used for import-data only ──
 export async function pushAllTrades(trades, userId) {
   if (!supabase || !userId) return;
@@ -173,16 +214,35 @@ export async function pushAllTrades(trades, userId) {
   if (error) throw error;
 }
 
-// ── Replace all trades — delete everything, then insert new set ──
+// ── Replace all trades — wipe-proof ──
+// Upserts the new set FIRST, then deletes only the leftovers (existing ids
+// not in the import). If anything fails mid-way the server is left with a
+// superset of the data, never an empty table. The old delete-then-insert
+// order could wipe every trade when the re-insert failed.
 export async function replaceAllTrades(trades, userId) {
   if (!supabase || !userId) return;
-  const { error: delErr } = await supabase
+  const next = trades || [];
+
+  const { data: existingRows, error: listErr } = await supabase
     .from('trades')
-    .delete()
+    .select('id')
     .eq('user_id', userId);
-  if (delErr) throw delErr;
-  if (trades && trades.length > 0) {
-    await pushAllTrades(trades, userId);
+  if (listErr) throw listErr;
+
+  if (next.length > 0) {
+    await pushAllTrades(next, userId);
+  }
+
+  const keep = new Set(next.map(t => t.id));
+  const leftovers = (existingRows || []).map(r => r.id).filter(id => !keep.has(id));
+  // Chunk deletes so a huge journal doesn't overflow the URL length limit
+  for (let i = 0; i < leftovers.length; i += 100) {
+    const { error: delErr } = await supabase
+      .from('trades')
+      .delete()
+      .eq('user_id', userId)
+      .in('id', leftovers.slice(i, i + 100));
+    if (delErr) throw delErr;
   }
 }
 
