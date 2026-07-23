@@ -10,6 +10,7 @@ import {
   getAccountStats,
   getActiveManualAccounts,
   getArchivedManualAccounts,
+  getStrategyAt,
   SESSIONS,
   SETUPS,
   EMOTIONS,
@@ -384,9 +385,13 @@ export default function Analytics({ state }) {
             <span>Danger</span>
             <span>Blown</span>
           </div>
-          {pooled.maxDdAt && (
-            <div className="text-xs text-white opacity-60 mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
-              Trough reached on <span className="font-mono">{pooled.maxDdAt}</span>
+          {(pooled.maxDdAt || pooled.maxDdDays > 0) && (
+            <div className="text-xs text-white opacity-60 mt-3 pt-3 border-t flex flex-wrap gap-x-4 gap-y-1" style={{ borderColor: 'var(--border)' }}>
+              {pooled.maxDdAt && <span>Trough on <span className="font-mono">{pooled.maxDdAt}</span></span>}
+              {pooled.maxDdDays > 0 && <span>Longest underwater: <span className="font-mono">{pooled.maxDdDays}d</span></span>}
+              {pooled.currentUnderwaterDays > 0 && (
+                <span style={{ color: COLORS.orange }}>Currently underwater: <span className="font-mono">{pooled.currentUnderwaterDays}d</span></span>
+              )}
             </div>
           )}
         </motion.div>
@@ -1219,6 +1224,89 @@ export default function Analytics({ state }) {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  // TAB 9: STRATEGIES — bot performance resolved from the assignment timeline
+  // ════════════════════════════════════════════════════════════════════════
+  const StrategiesTab = () => {
+    const localDateStr = (ts) => {
+      const d = new Date(ts)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    const bts = (state.botTrades || []).filter(bt => inRange({ date: localDateStr(bt.exit_ts) }))
+    const assignments = state.strategyAssignments || []
+
+    if (bts.length === 0) {
+      return (
+        <div className="rounded-2xl p-8 border text-center" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+          <div className="text-sm text-white opacity-50">No bot trades in this period</div>
+          <div className="text-xs text-white opacity-40 mt-1">
+            Import broker CSVs on the Import Bot page — each trade is attributed to whichever
+            strategy was assigned to its account at exit time.
+          </div>
+        </div>
+      )
+    }
+
+    const net = (t) => (Number(t.pnl) || 0) - (Number(t.fees) || 0)
+    const byStrategy = {}
+    bts.forEach(bt => {
+      const a = getStrategyAt(assignments, bt.account_id, bt.exit_ts)
+      const name = a?.strategyName || 'Unassigned'
+      if (!byStrategy[name]) byStrategy[name] = []
+      byStrategy[name].push(bt)
+    })
+    const rows = Object.entries(byStrategy).map(([name, trades]) => {
+      const sorted = [...trades].sort((x, y) => new Date(x.exit_ts) - new Date(y.exit_ts))
+      const wins = sorted.filter(t => net(t) > 0).length
+      const total = sorted.reduce((s, t) => s + net(t), 0)
+      let cum = 0
+      const curve = sorted.map((t, i) => ({ i, y: (cum += net(t)) }))
+      return { name, count: sorted.length, wins, wr: wins / sorted.length, total, avg: total / sorted.length, curve }
+    }).sort((a, b) => b.total - a.total)
+
+    return (
+      <div className="space-y-3">
+        {rows.map(r => (
+          <motion.div
+            key={r.name}
+            className="rounded-2xl p-4 border flex items-center gap-4"
+            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+            {...tabTransition}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-white truncate">{r.name}</div>
+              <div className="text-[11px] text-white opacity-50">{r.count} trade{r.count === 1 ? '' : 's'}</div>
+            </div>
+            <div className="w-32 h-9">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={r.curve} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                  <Line type="monotone" dataKey="y" dot={false} strokeWidth={1.5}
+                    stroke={r.total >= 0 ? COLORS.green : COLORS.red} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="text-right w-16">
+              <div className="text-[11px] text-white opacity-50">WR</div>
+              <div className="text-sm font-semibold text-white">{pct(r.wr)}</div>
+            </div>
+            <div className="text-right w-20">
+              <div className="text-[11px] text-white opacity-50">Avg / trade</div>
+              <div className="text-sm font-mono" style={{ color: r.avg >= 0 ? COLORS.green : COLORS.red }}>{fmt(r.avg)}</div>
+            </div>
+            <div className="text-right w-24">
+              <div className="text-[11px] text-white opacity-50">Net P&L</div>
+              <div className="text-base font-bold font-mono" style={{ color: r.total >= 0 ? COLORS.green : COLORS.red }}>{fmt(r.total)}</div>
+            </div>
+          </motion.div>
+        ))}
+        <div className="text-[11px] text-white opacity-40 px-1">
+          Win rate counts trades with positive net P&L (after fees). Strategy attribution follows
+          the assignment timeline — switching a bot's strategy only affects trades after the switch.
+        </div>
+      </div>
+    )
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════════════
   const tabs = [
@@ -1228,6 +1316,7 @@ export default function Analytics({ state }) {
     { id: 'setup', label: 'By Setup' },
     { id: 'tags', label: 'Tags' },
     { id: 'accounts', label: 'Accounts' },
+    { id: 'strategies', label: 'Strategies' },
     { id: 'streaks', label: 'Streaks' },
     { id: 'emotions', label: 'Emotions' },
   ]
@@ -1318,6 +1407,7 @@ export default function Analytics({ state }) {
         {activeTab === 'setup' && <BySetupTab />}
         {activeTab === 'tags' && <TagsTab />}
         {activeTab === 'accounts' && <AccountsTab />}
+        {activeTab === 'strategies' && <StrategiesTab />}
         {activeTab === 'streaks' && <StreaksTab />}
         {activeTab === 'emotions' && <EmotionsTab />}
       </motion.div>

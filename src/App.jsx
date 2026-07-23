@@ -14,6 +14,7 @@ import {
   signOut,
   pushAssignment,
   closeActiveAssignment,
+  switchStrategyAtomic,
   upsertBotTrades,
 } from './lib/supabase'
 import { saveSnapshot, listSnapshots, downloadSnapshot } from './lib/backup'
@@ -366,8 +367,13 @@ export default function App() {
     markSyncing()
     ;(async () => {
       try {
-        await closeActiveAssignment(accountId, startedAt, user.id)
-        await pushAssignment(newAssignment, user.id)
+        // Prefer the atomic Postgres function; fall back to the two-step
+        // close+insert when the migration hasn't been run yet.
+        const atomic = await switchStrategyAtomic(newAssignment, user.id)
+        if (!atomic) {
+          await closeActiveAssignment(accountId, startedAt, user.id)
+          await pushAssignment(newAssignment, user.id)
+        }
         markSynced()
       } catch (err) {
         console.error('Switch strategy sync failed:', err)

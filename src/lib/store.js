@@ -4,6 +4,27 @@
 
 // ── Constants ──
 export const INSTRUMENTS = ['MNQ', 'MES', 'MYM'];
+// Dollars per 1.0 point of price movement per contract — used to derive
+// risk $ (and therefore R) from entry/stop prices instead of hand-typing R.
+export const POINT_VALUES = { MNQ: 2, MES: 5, MYM: 0.5 };
+
+// Derive dollar risk and realized R from optional per-entry price fields.
+// Returns null when the data isn't there — derived R is an assist, never a
+// requirement; the stored `r` remains the source of truth for stats.
+export function deriveEntryRisk(entry, instrument) {
+  const pv = POINT_VALUES[instrument];
+  const qty = Number(entry?.qty);
+  const ep = Number(entry?.entryPrice);
+  const sp = Number(entry?.stopPrice);
+  if (!pv || !qty || !isFinite(ep) || !isFinite(sp) || ep === sp) return null;
+  const riskDollars = Math.abs(ep - sp) * qty * pv;
+  if (!(riskDollars > 0)) return null;
+  const pnl = Number(entry?.pnl) || 0;
+  return {
+    riskDollars,
+    suggestedR: Math.round((pnl / riskDollars) * 10) / 10,
+  };
+}
 export const SESSIONS = ['New York AM', 'New York PM', 'London', 'Asian'];
 export const SETUPS = ['CISD', 'BOS', 'FVG', 'OB', 'Liquidity Sweep', 'EQ Level', 'Other'];
 export const EMOTIONS = ['Calm', 'Confident', 'Anxious', 'FOMO', 'Revenge', 'Frustrated'];
@@ -449,6 +470,7 @@ export function createTrade(overrides = {}) {
     instrument: last.instrument || 'MNQ',
     session: last.session || 'New York AM',
     setup: last.setup || '',
+    side: null, // 'long' | 'short' | null — direction of the idea
     thesis: '',
     entries: [
       { slot: 1, triggered: false, result: null, r: 0, pnl: 0 },
@@ -1009,6 +1031,32 @@ export function calcPooledHealth(trades, accounts, settings) {
   const currentCombinedPeak = peak
   const currentCombinedPeakAt = peakDate
 
+  // Drawdown DURATION: how long the combined curve has stayed below a prior
+  // peak. Depth says how much it hurt; duration says how long it dragged on.
+  let maxDdDays = 0
+  let underwaterSince = null
+  {
+    let ddPeakVal = startingCombined
+    let ddPeakDate = null
+    curve.forEach((pt) => {
+      if (pt.combined >= ddPeakVal) {
+        if (underwaterSince && pt.date) {
+          const days = (new Date(pt.date) - new Date(underwaterSince)) / 86400000
+          if (days > maxDdDays) maxDdDays = days
+        }
+        ddPeakVal = pt.combined
+        ddPeakDate = pt.date
+        underwaterSince = null
+      } else if (underwaterSince === null) {
+        underwaterSince = ddPeakDate // null when the very first point is a loss
+      }
+    })
+  }
+  const currentUnderwaterDays = underwaterSince
+    ? Math.max(0, Math.round((Date.now() - new Date(underwaterSince + 'T00:00:00').getTime()) / 86400000))
+    : 0
+  if (currentUnderwaterDays > maxDdDays) maxDdDays = currentUnderwaterDays
+
   return {
     pooledMll,
     pooledPt,
@@ -1028,6 +1076,9 @@ export function calcPooledHealth(trades, accounts, settings) {
     maxDdPeak,
     maxDdPeakAt,
     maxDdPctOfPool,
+    maxDdDays: Math.round(maxDdDays),
+    underwaterSince,
+    currentUnderwaterDays,
     currentCombinedPeak,
     currentCombinedPeakAt,
   }

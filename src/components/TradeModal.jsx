@@ -4,6 +4,7 @@ import { X, Camera, Clipboard, Trash2 } from 'lucide-react'
 import {
   createTrade,
   rememberTradeDefaults,
+  deriveEntryRisk,
   INSTRUMENTS,
   SESSIONS,
   SETUPS,
@@ -61,9 +62,29 @@ function SectionLabel({ children }) {
 // ENTRY ROW
 // ═══════════════════════════════════════════════════
 
-function EntryRow({ slot, entry, onChange }) {
+function EntryRow({ slot, entry, onChange, instrument }) {
   const colors = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' }
   const c = colors[slot]
+  // Optional price capture — lets the app DERIVE risk $ and R instead of
+  // trusting a hand-typed R. Opens automatically if data already exists.
+  const [showDetails, setShowDetails] = useState(
+    entry.qty != null || entry.entryPrice != null || entry.stopPrice != null
+  )
+  const risk = deriveEntryRisk(entry, instrument)
+  const numOrNull = (v) => (v === '' ? null : parseFloat(v))
+  const detailField = (key, label, step) => (
+    <div className="flex-1">
+      <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <input
+        type="number"
+        step={step}
+        value={entry[key] ?? ''}
+        onChange={e => onChange({ ...entry, [key]: numOrNull(e.target.value) })}
+        className="w-full px-2 py-1.5 rounded-lg text-sm font-mono outline-none"
+        style={{ background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' }}
+      />
+    </div>
+  )
 
   return (
     <div className="p-3 rounded-xl mb-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
@@ -134,6 +155,45 @@ function EntryRow({ slot, entry, onChange }) {
             />
           </div>
         </motion.div>
+      )}
+      {entry.triggered && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowDetails(v => !v)}
+            className="text-[11px] border-0 bg-transparent cursor-pointer p-0"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {showDetails ? '− hide details' : '+ contracts & prices (auto-R)'}
+          </button>
+          {showDetails && (
+            <div className="mt-2">
+              <div className="flex gap-2">
+                {detailField('qty', 'Contracts', '1')}
+                {detailField('entryPrice', 'Entry price', '0.25')}
+                {detailField('stopPrice', 'Stop price', '0.25')}
+              </div>
+              {risk && (
+                <div className="flex items-center gap-2 mt-2 text-[11px]" style={{ color: 'var(--text-dim)' }}>
+                  <span>Risk: <span className="font-mono font-semibold">${risk.riskDollars.toFixed(0)}</span></span>
+                  {entry.result === 'W' && (
+                    <>
+                      <span>→ realized <span className="font-mono font-semibold">{risk.suggestedR}R</span></span>
+                      {entry.r !== risk.suggestedR && (
+                        <button
+                          onClick={() => onChange({ ...entry, r: risk.suggestedR })}
+                          className="px-2 py-0.5 rounded-md text-[11px] font-semibold border-0 cursor-pointer"
+                          style={{ background: 'var(--blue-dim)', color: 'var(--accent)' }}
+                        >
+                          use as R
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
@@ -492,6 +552,22 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
                   </div>
                 </div>
 
+                {/* Direction */}
+                <div className="mb-4">
+                  <SectionLabel>Direction</SectionLabel>
+                  <div className="flex gap-2">
+                    {['long', 'short'].map(s => (
+                      <Chip
+                        key={s}
+                        label={s === 'long' ? 'Long ▲' : 'Short ▼'}
+                        selected={form.side === s}
+                        onClick={() => update('side', form.side === s ? null : s)}
+                        color={form.side === s ? (s === 'long' ? 'var(--green)' : 'var(--red)') : undefined}
+                      />
+                    ))}
+                  </div>
+                </div>
+
                 {/* Emotion + Quality */}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
@@ -525,7 +601,7 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
                   </p>
                 </div>
                 {form.entries.map((e, i) => (
-                  <EntryRow key={i} slot={e.slot} entry={e} onChange={(val) => updateEntry(i, val)} />
+                  <EntryRow key={i} slot={e.slot} entry={e} instrument={form.instrument} onChange={(val) => updateEntry(i, val)} />
                 ))}
               </motion.div>
             )}

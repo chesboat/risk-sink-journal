@@ -302,6 +302,27 @@ const assignmentToRow = (a, userId) => ({
   note: a.note,
 });
 
+// Atomic close-active + insert-new in one transaction via the
+// switch_strategy Postgres function (migrations/2026-07-22-switch-strategy-rpc.sql).
+// Returns false when the function isn't installed so callers can fall back
+// to the two-step path.
+export async function switchStrategyAtomic(assignment, userId) {
+  if (!supabase || !userId) return true;
+  const { error } = await supabase.rpc('switch_strategy', {
+    p_id: assignment.id,
+    p_account_id: assignment.accountId,
+    p_strategy_name: assignment.strategyName,
+    p_started_at: assignment.startedAt,
+    p_note: assignment.note ?? null,
+  });
+  if (error) {
+    // PGRST202 = function not found in the schema cache
+    if (error.code === 'PGRST202' || /switch_strategy/.test(error.message || '')) return false;
+    throw error;
+  }
+  return true;
+}
+
 export async function pushAssignment(assignment, userId) {
   if (!supabase || !userId) return;
   const { error } = await supabase

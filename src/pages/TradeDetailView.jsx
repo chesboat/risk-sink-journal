@@ -278,6 +278,13 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
                       <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{label}</span>
+                      {(entry.qty || entry.entryPrice) && (
+                        <span className="text-[10px] font-mono" style={{ color: 'var(--text-dim)', opacity: 0.6 }}>
+                          {entry.qty ? `${entry.qty}x` : ''}
+                          {entry.entryPrice ? ` @ ${entry.entryPrice}` : ''}
+                          {entry.stopPrice ? ` · stop ${entry.stopPrice}` : ''}
+                        </span>
+                      )}
                     </div>
                     {isTriggered ? (
                       <div className="flex items-center gap-3">
@@ -344,10 +351,10 @@ export default function TradeDetailView({ trade, onBack, onEdit, onDelete }) {
               {[
                 { label: 'Date', value: formatDate(trade.date) },
                 { label: 'Instrument', value: trade.instrument },
+                { label: 'Direction', value: trade.side ? (trade.side === 'long' ? 'Long ▲' : 'Short ▼') : '—' },
                 { label: 'Session', value: trade.session || '—' },
                 { label: 'Setup', value: trade.setup || '—' },
                 { label: 'Emotion', value: trade.emotion || '—' },
-                { label: 'Account', value: trade.account || '—' },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between items-center">
                   <span className="text-xs" style={{ color: 'var(--text-dim)', opacity: 0.6 }}>{label}</span>
