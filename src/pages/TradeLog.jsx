@@ -11,6 +11,7 @@ import {
   Tag,
   X,
   Check,
+  Copy,
 } from 'lucide-react';
 import {
   getIdeaResult,
@@ -30,6 +31,7 @@ export default function TradeLog({
   openEditTrade,
   updateTrade,
   deleteTrade,
+  duplicateTrade,
 }) {
   const { trades, accounts, settings } = state;
   const customTags = settings?.customTags || {};
@@ -752,6 +754,19 @@ export default function TradeLog({
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {duplicateTrade && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            duplicateTrade(trade);
+                          }}
+                          className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
+                          style={{ background: 'transparent', color: 'var(--text-dim)' }}
+                          title="Duplicate as new trade (same setup, fresh entries)"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

@@ -2,7 +2,18 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, AreaChart, Area, ReferenceLine, ComposedChart } from 'recharts'
 import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
-import { calcStats, calcPooledHealth, calcTagStats, getIdeaResult, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
+import {
+  calcStats,
+  calcPooledHealth,
+  calcTagStats,
+  getIdeaResult,
+  getAccountStats,
+  getActiveManualAccounts,
+  getArchivedManualAccounts,
+  SESSIONS,
+  SETUPS,
+  EMOTIONS,
+} from '../lib/store'
 
 const COLORS = {
   green: '#30d158',
@@ -1131,6 +1142,83 @@ export default function Analytics({ state }) {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  // TAB 8: ACCOUNTS — active vs archived eras, side by side
+  // ════════════════════════════════════════════════════════════════════════
+  const AccountsTab = () => {
+    const active = getActiveManualAccounts(state.accounts || [])
+    const archived = getArchivedManualAccounts(state.accounts || [])
+    const all = [...active, ...archived]
+
+    if (all.length === 0) {
+      return (
+        <div className="rounded-2xl p-8 border text-center" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+          <div className="text-sm text-white opacity-50">No manual accounts yet</div>
+        </div>
+      )
+    }
+
+    return (
+      <motion.div
+        className="rounded-2xl border overflow-hidden"
+        style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+        {...tabTransition}
+      >
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: 'var(--surface)' }}>
+              {['Account', 'Entries', 'Win Rate', 'Journal P&L', 'Total P&L', 'PT Progress', 'MLL Used'].map((h, i) => (
+                <th key={h} className={`px-4 py-3 text-xs font-semibold text-white opacity-60 ${i === 0 ? 'text-left' : 'text-right'}`}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {all.map(a => {
+              const s = getAccountStats(a, rangedTrades, state.settings)
+              return (
+                <tr key={a.id} style={{ borderTop: '1px solid var(--border)', opacity: a.archived ? 0.65 : 1 }}>
+                  <td className="px-4 py-3">
+                    <div className="text-white font-medium">
+                      {a.name}
+                      {a.archived && (
+                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded uppercase font-semibold" style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}>
+                          archived
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-white opacity-40">
+                      E{Number(String(a.slot).replace(/^E/i, '')) || '?'}
+                      {a.activeFrom ? ` · from ${a.activeFrom}` : ''}
+                      {a.archivedAt ? ` · to ${a.archivedAt.slice(0, 10)}` : ''}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right text-white">{s.totalEntries}</td>
+                  <td className="px-4 py-3 text-right text-white">{pct(s.slotWR)}</td>
+                  <td className="px-4 py-3 text-right font-mono" style={{ color: s.journalPnl >= 0 ? COLORS.green : COLORS.red }}>
+                    {fmt(s.journalPnl)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold" style={{ color: s.totalPnl >= 0 ? COLORS.green : COLORS.red }}>
+                    {fmt(s.totalPnl)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-white">{Math.round(s.ptPercent || 0)}%</td>
+                  <td className="px-4 py-3 text-right" style={{ color: s.mllPercent > 50 ? COLORS.green : s.mllPercent > 25 ? COLORS.orange : COLORS.red }}>
+                    {Math.round(100 - (s.mllPercent || 0))}%
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        <div className="px-4 py-2.5 text-[11px] text-white opacity-40" style={{ background: 'var(--surface)' }}>
+          Each account only counts trades from its own era (archived accounts keep their history).
+          Journal P&L respects the date filter; Total P&L adds the account's starting P&L.
+        </div>
+      </motion.div>
+    )
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════════════
   const tabs = [
@@ -1139,6 +1227,7 @@ export default function Analytics({ state }) {
     { id: 'session', label: 'By Session' },
     { id: 'setup', label: 'By Setup' },
     { id: 'tags', label: 'Tags' },
+    { id: 'accounts', label: 'Accounts' },
     { id: 'streaks', label: 'Streaks' },
     { id: 'emotions', label: 'Emotions' },
   ]
@@ -1228,6 +1317,7 @@ export default function Analytics({ state }) {
         {activeTab === 'session' && <BySessionTab />}
         {activeTab === 'setup' && <BySetupTab />}
         {activeTab === 'tags' && <TagsTab />}
+        {activeTab === 'accounts' && <AccountsTab />}
         {activeTab === 'streaks' && <StreaksTab />}
         {activeTab === 'emotions' && <EmotionsTab />}
       </motion.div>

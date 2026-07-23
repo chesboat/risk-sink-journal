@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Camera, Clipboard, Trash2 } from 'lucide-react'
 import {
   createTrade,
+  rememberTradeDefaults,
   INSTRUMENTS,
   SESSIONS,
   SETUPS,
@@ -153,22 +154,7 @@ function ScreenshotZone({ screenshot, onChange }) {
     reader.readAsDataURL(file)
   }, [onChange])
 
-  // Cmd+V paste handler — attached to the whole modal
-  useEffect(() => {
-    const handlePaste = (e) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          e.preventDefault()
-          processFile(item.getAsFile())
-          return
-        }
-      }
-    }
-    window.addEventListener('paste', handlePaste)
-    return () => window.removeEventListener('paste', handlePaste)
-  }, [processFile])
+  // (Cmd+V paste is handled at the modal level so it works from any tab.)
 
   return (
     <div>
@@ -312,14 +298,53 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
       },
     }
   })
-  const [activeSection, setActiveSection] = useState('info') // 'info' | 'entries' | 'journal' | 'tags'
+  // New trades open straight on Entries — the outcome is what gets logged
+  // after a session; Trade Info is pre-filled from the last trade anyway.
+  const [activeSection, setActiveSection] = useState(trade ? 'info' : 'entries') // 'info' | 'entries' | 'journal' | 'tags'
 
-  // Close on Escape key
+  // Dirty-close guard: a stray backdrop click or Escape used to silently
+  // throw away a fully-entered trade.
+  const formRef = useRef(form)
+  useEffect(() => { formRef.current = form }, [form])
+  const initialJsonRef = useRef(null)
+  if (initialJsonRef.current === null) initialJsonRef.current = JSON.stringify(form)
+  const requestClose = () => {
+    const dirty = JSON.stringify(formRef.current) !== initialJsonRef.current
+    if (dirty && !confirm('Discard this trade? Your changes will be lost.')) return
+    onClose()
+  }
+
+  // Keyboard: Escape closes (guarded), Cmd/Ctrl+Enter saves
+  const saveRef = useRef(null)
   useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleEsc)
-    return () => window.removeEventListener('keydown', handleEsc)
-  }, [onClose])
+    const handleKey = (e) => {
+      if (e.key === 'Escape') requestClose()
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveRef.current?.()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Screenshot paste works from ANY tab of the modal (the drop zone itself
+  // only mounts on Trade Info)
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const reader = new FileReader()
+          reader.onload = (ev) => setForm(f => ({ ...f, screenshot: ev.target.result }))
+          reader.readAsDataURL(item.getAsFile())
+          return
+        }
+      }
+    }
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
+  }, [])
 
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }))
   const updateEntry = (idx, entry) => {
@@ -355,8 +380,10 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
       }
     }
     if (issues.length > 0 && !confirm(`Heads up:\n\n• ${issues.join('\n• ')}\n\nSave anyway?`)) return
+    rememberTradeDefaults(form)
     onSave(form)
   }
+  saveRef.current = handleSave
 
   const sections = [
     { id: 'info', label: 'Trade Info' },
@@ -376,7 +403,7 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
       exit={{ opacity: 0, pointerEvents: 'none' }}
       transition={{ duration: 0.15 }}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={requestClose} />
       <motion.div
         className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl"
         style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
@@ -388,7 +415,7 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
         {/* Header */}
         <div className="flex justify-between items-center p-5 pb-0">
           <h2 className="text-lg font-bold" style={{ color: 'var(--text)' }}>{trade ? 'Edit Trade' : 'New Trade'}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg cursor-pointer border-0" style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}>
+          <button onClick={requestClose} className="p-1.5 rounded-lg cursor-pointer border-0" style={{ background: 'var(--surface)', color: 'var(--text-dim)' }}>
             <X size={18} />
           </button>
         </div>

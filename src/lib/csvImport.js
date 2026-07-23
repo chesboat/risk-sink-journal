@@ -124,18 +124,81 @@ const parseSide = (v) => {
   return s.includes('short') ? 'short' : s.includes('long') ? 'long' : null;
 };
 
-// Parse various timestamp formats brokers emit. Returns ISO string or null.
-// Examples seen in the wild: "2026-03-04 09:32:14", "03/04/2026 9:32:14 AM",
-// "2026-03-04T09:32:14Z", epoch ms.
-const parseTs = (v) => {
+// ── Timezone-aware timestamp parsing ──
+// Broker exports usually carry NAIVE timestamps ("2026-03-04 09:32:14") in
+// exchange/account time with no offset. Parsing those as browser-local (the
+// old behavior) shifts trades across midnight for anyone not in that zone,
+// corrupting daily P&L buckets. `tz` says how to interpret naive strings:
+//   'America/New_York' (default — futures convention), any IANA zone,
+//   'UTC', or 'local' (browser timezone).
+// Strings with an explicit offset/Z, and epoch values, are unambiguous and
+// ignore tz.
+
+// Convert a wall-clock time in an IANA zone to a UTC timestamp. Two-pass
+// offset resolution handles DST boundaries.
+const zonedWallTimeToUtc = (y, mo, d, hh, mm, ss, timeZone) => {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+  const wallOf = (ts) => {
+    const p = {};
+    dtf.formatToParts(ts).forEach(x => { p[x.type] = x.value; });
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +(p.hour === '24' ? 0 : p.hour), +p.minute, +p.second);
+  };
+  const target = Date.UTC(y, mo - 1, d, hh, mm, ss);
+  let ts = target - (wallOf(target) - target);
+  ts = target - (wallOf(ts) - ts);
+  return ts;
+};
+
+const NAIVE_ISO = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+const NAIVE_US = /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i;
+
+const parseTs = (v, tz = 'America/New_York') => {
   if (v == null || v === '') return null;
   if (typeof v === 'number') return new Date(v).toISOString();
   const s = String(v).trim();
   if (/^\d{13}$/.test(s)) return new Date(parseInt(s, 10)).toISOString();
   if (/^\d{10}$/.test(s)) return new Date(parseInt(s, 10) * 1000).toISOString();
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString();
-  // Try replacing space with T (some brokers use "YYYY-MM-DD HH:MM:SS")
+
+  // Explicit offset or Z → unambiguous, let Date handle it
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // Naive formats → interpret in the chosen timezone
+  let y, mo, d, hh, mm, ss;
+  let m = s.match(NAIVE_ISO);
+  if (m) {
+    [y, mo, d, hh, mm, ss] = [+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0)];
+  } else {
+    m = s.match(NAIVE_US);
+    if (m) {
+      [mo, d, y, hh, mm, ss] = [+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0)];
+      const ampm = (m[7] || '').toUpperCase();
+      if (ampm === 'PM' && hh < 12) hh += 12;
+      if (ampm === 'AM' && hh === 12) hh = 0;
+    }
+  }
+  if (y != null) {
+    if (tz === 'local') {
+      return new Date(y, mo - 1, d, hh, mm, ss).toISOString();
+    }
+    if (tz === 'UTC') {
+      return new Date(Date.UTC(y, mo - 1, d, hh, mm, ss)).toISOString();
+    }
+    try {
+      return new Date(zonedWallTimeToUtc(y, mo, d, hh, mm, ss, tz)).toISOString();
+    } catch {
+      // Unknown zone id — fall through to permissive parsing
+    }
+  }
+
+  // Last resort: permissive Date parsing (browser-local)
+  const d1 = new Date(s);
+  if (!isNaN(d1.getTime())) return d1.toISOString();
   const d2 = new Date(s.replace(' ', 'T'));
   if (!isNaN(d2.getTime())) return d2.toISOString();
   return null;
@@ -145,16 +208,23 @@ const parseTs = (v) => {
 //
 // account is the bot account record this CSV is being imported into.
 // source is a short identifier like 'tradovate-csv' or 'topstepx-csv'.
+// opts:
+//   tz            — how naive timestamps are interpreted (see parseTs)
+//   feesIncluded  — true when the CSV's P&L column is already net of
+//                   commissions (the common case). Fees are then recorded
+//                   as 0 so downstream `pnl - fees` math doesn't subtract
+//                   them a second time.
 // Returns an object ready for upsert, or null + error reason if unimportable.
-export function normalizeRow(row, mapping, account, source) {
+export function normalizeRow(row, mapping, account, source, opts = {}) {
+  const { tz = 'America/New_York', feesIncluded = true } = opts;
   const get = (field) => mapping[field] ? row[mapping[field]] : null;
 
   const externalId = get('externalId');
   if (!externalId) return { ok: false, reason: 'missing trade ID' };
 
-  const exitTs = parseTs(get('exitTs'));
+  const exitTs = parseTs(get('exitTs'), tz);
   if (!exitTs) return { ok: false, reason: 'missing or unparseable exit time' };
-  const entryTs = parseTs(get('entryTs')) || exitTs;
+  const entryTs = parseTs(get('entryTs'), tz) || exitTs;
 
   const qty = parseNumber(get('qty'));
   if (qty == null) return { ok: false, reason: 'missing quantity' };
@@ -174,30 +244,33 @@ export function normalizeRow(row, mapping, account, source) {
       account_id: account.id,
       broker: account.broker || null,
       symbol,
-      side: parseSide(get('side')) || 'long',
+      // null when the CSV has no side column — an honest unknown beats
+      // silently marking every trade long
+      side: parseSide(get('side')),
       qty: Math.abs(qty),
       entry_ts: entryTs,
       exit_ts: exitTs,
       entry_price: parseNumber(get('entryPrice')),
       exit_price: parseNumber(get('exitPrice')),
       pnl,
-      fees: parseNumber(get('fees')) || 0,
+      fees: feesIncluded ? 0 : (parseNumber(get('fees')) || 0),
       raw_payload: row,
     },
   };
 }
 
-// Deduplicate against trades already present in state. Returns
-// { fresh: [trade...], duplicates: [{trade, existingId}...] }.
+// Deduplicate against trades already present in state. Keyed per ACCOUNT —
+// broker order ids are only unique within an account, so the same id on two
+// accounts is two different trades, not a duplicate.
+// Returns { fresh: [trade...], duplicates: [{trade, existingId}...] }.
 export function dedupe(newTrades, existing) {
-  const seen = new Map(); // key: source|external_id → existing trade
-  (existing || []).forEach(t => {
-    seen.set(`${t.source}|${t.external_id}`, t);
-  });
+  const keyOf = (t) => `${t.source}|${t.external_id}|${t.account_id}`;
+  const seen = new Map();
+  (existing || []).forEach(t => { seen.set(keyOf(t), t); });
   const fresh = [];
   const duplicates = [];
   newTrades.forEach(t => {
-    const key = `${t.source}|${t.external_id}`;
+    const key = keyOf(t);
     if (seen.has(key)) duplicates.push({ trade: t, existing: seen.get(key) });
     else { fresh.push(t); seen.set(key, t); }
   });
@@ -206,14 +279,14 @@ export function dedupe(newTrades, existing) {
 
 // Convenience: parse + normalize + dedupe in one call.
 // Returns { headers, mapping, missing, rows: {ok,error}[], fresh, duplicates }.
-export function processCsv(text, account, source, existingTrades) {
+export function processCsv(text, account, source, existingTrades, opts = {}) {
   const { headers, data } = parseCsv(text);
   const mapping = detectMapping(headers);
   const missing = missingRequired(mapping);
   if (missing.length > 0) {
     return { headers, mapping, missing, rows: [], fresh: [], duplicates: [] };
   }
-  const rows = data.map(row => normalizeRow(row, mapping, account, source));
+  const rows = data.map(row => normalizeRow(row, mapping, account, source, opts));
   const oks = rows.filter(r => r.ok).map(r => r.trade);
   const { fresh, duplicates } = dedupe(oks, existingTrades);
   return { headers, mapping, missing, rows, fresh, duplicates };

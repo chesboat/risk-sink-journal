@@ -421,13 +421,34 @@ export function importData(file) {
 }
 
 // ── Trade Helpers ──
+// Carry-forward defaults: the next New Trade opens pre-filled with the last
+// instrument/session/setup so daily logging doesn't re-pick the same chips.
+const LAST_DEFAULTS_KEY = 'rsj-last-trade-defaults';
+export function rememberTradeDefaults(trade) {
+  try {
+    localStorage.setItem(LAST_DEFAULTS_KEY, JSON.stringify({
+      instrument: trade.instrument,
+      session: trade.session,
+      setup: trade.setup,
+    }));
+  } catch { /* storage unavailable — skip */ }
+}
+function lastTradeDefaults() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_DEFAULTS_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
 export function createTrade(overrides = {}) {
+  const last = lastTradeDefaults();
   return {
     id: crypto.randomUUID(),
     date: new Date().toISOString().slice(0, 10),
-    instrument: 'MNQ',
-    session: 'New York AM',
-    setup: '',
+    instrument: last.instrument || 'MNQ',
+    session: last.session || 'New York AM',
+    setup: last.setup || '',
     thesis: '',
     entries: [
       { slot: 1, triggered: false, result: null, r: 0, pnl: 0 },

@@ -250,13 +250,14 @@ export async function replaceAllTrades(trades, userId) {
 // BOT TRADES
 // ═══════════════════════════════════════════════════
 
-// Upsert a single bot trade. Idempotent on (user_id, source, external_id).
+// Upsert a single bot trade. Idempotent on (user_id, source, external_id,
+// account_id) — order ids are only unique per account.
 export async function pushBotTrade(trade, userId) {
   if (!supabase || !userId) return;
   const row = { ...trade, user_id: userId, updated_at: new Date().toISOString() };
   const { error } = await supabase
     .from('bot_trades')
-    .upsert(row, { onConflict: 'user_id,source,external_id' });
+    .upsert(row, { onConflict: 'user_id,source,external_id,account_id' });
   if (error) throw error;
 }
 
@@ -281,7 +282,7 @@ export async function upsertBotTrades(trades, userId) {
   }));
   const { error } = await supabase
     .from('bot_trades')
-    .upsert(rows, { onConflict: 'user_id,source,external_id' });
+    .upsert(rows, { onConflict: 'user_id,source,external_id,account_id' });
   if (error) throw error;
 }
 

@@ -46,8 +46,9 @@ CREATE POLICY "Owner only on config" ON config
 -- bot_trades: one row per closed bot position
 -- Strategy is NOT denormalized here — it's resolved at read time
 -- by looking up bot_strategy_assignments active at exit_ts.
--- (user_id, source, external_id) is the idempotency key: re-running
--- ingestion never duplicates rows.
+-- (user_id, source, external_id, account_id) is the idempotency key:
+-- re-running ingestion never duplicates rows, and the same broker order
+-- id on two different accounts stays two distinct trades.
 -- ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS bot_trades (
   id TEXT PRIMARY KEY,
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS bot_trades (
   account_id TEXT NOT NULL,      -- references config.accounts[].id (loose, jsonb-resident)
   broker TEXT,                   -- 'tradovate' | 'topstepx' (platform that hosts the account)
   symbol TEXT NOT NULL,
-  side TEXT NOT NULL,            -- 'long' | 'short'
+  side TEXT,                     -- 'long' | 'short' | NULL when the export has no side column
   qty NUMERIC NOT NULL,
   entry_ts TIMESTAMPTZ NOT NULL,
   exit_ts TIMESTAMPTZ NOT NULL,
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS bot_trades (
   raw_payload JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (user_id, source, external_id)
+  UNIQUE (user_id, source, external_id, account_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_trades_user_exit ON bot_trades (user_id, exit_ts DESC);

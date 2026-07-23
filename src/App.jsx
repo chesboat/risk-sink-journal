@@ -405,6 +405,29 @@ export default function App() {
     setShowModal(true)
   }
 
+  // Duplicate: opens the modal with a NEW trade pre-filled from an existing
+  // one (setup context copied, entries/journal reset). Saving goes through
+  // addTrade because the fresh id isn't in state yet.
+  const openDuplicateTrade = (trade) => {
+    const copy = createTrade({
+      instrument: trade.instrument,
+      session: trade.session,
+      setup: trade.setup,
+      thesis: trade.thesis || '',
+      tags: JSON.parse(JSON.stringify(trade.tags || {})),
+    })
+    setEditTrade(copy)
+    setShowModal(true)
+  }
+
+  // The modal's editTrade may be an existing trade OR a fresh duplicate —
+  // route the save by whether the id already exists.
+  const saveFromModal = useCallback((t) => {
+    const exists = stateRef.current.trades.some(x => x.id === t.id)
+    if (exists) updateTrade(t)
+    else addTrade(t)
+  }, [updateTrade, addTrade])
+
   const closeDetailView = () => {
     setViewTrade(null)
     if (prevPage) setPage(prevPage)
@@ -459,7 +482,7 @@ export default function App() {
       )
     }
 
-    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, updateAccounts, updateSettings, switchStrategy, importBotTrades }
+    const props = { state, openEditTrade: openViewTrade, updateTrade, deleteTrade: deleteTradeHandler, duplicateTrade: openDuplicateTrade, updateAccounts, updateSettings, switchStrategy, importBotTrades }
     switch (page) {
       case 'dashboard': return <Dashboard {...props} />
       case 'calendar': return <CalendarPage {...props} />
@@ -537,7 +560,7 @@ export default function App() {
           {showModal && (
             <TradeModal
               trade={editTrade}
-              onSave={editTrade ? updateTrade : addTrade}
+              onSave={saveFromModal}
               onClose={() => { setShowModal(false); setEditTrade(null) }}
               customTags={state.settings.customTags || {}}
               onAddCustomTag={addCustomTag}
@@ -696,7 +719,7 @@ export default function App() {
         {showModal && (
           <TradeModal
             trade={editTrade}
-            onSave={editTrade ? updateTrade : addTrade}
+            onSave={saveFromModal}
             onClose={() => { setShowModal(false); setEditTrade(null) }}
           />
         )}

@@ -28,6 +28,12 @@ export default function ImportBotTrades({ state, importBotTrades }) {
   const [accountId, setAccountId] = useState(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null); // { count, dupes, errors } after import
+  // Naive CSV timestamps are interpreted in this zone (futures exports are
+  // conventionally US/Eastern). 'local' = this computer's timezone.
+  const [csvTz, setCsvTz] = useState('America/New_York');
+  // Most broker "Realized P&L" columns are already net of commissions;
+  // unchecking makes the app subtract the Fees column itself.
+  const [feesIncluded, setFeesIncluded] = useState(true);
 
   const botAccounts = useMemo(() => getBotAccounts(state.accounts || []), [state.accounts]);
   const selectedAccount = botAccounts.find(a => a.id === accountId) || null;
@@ -38,8 +44,8 @@ export default function ImportBotTrades({ state, importBotTrades }) {
   // Process the CSV (parse + dedupe) reactively whenever the inputs change
   const processed = useMemo(() => {
     if (!csvText || !selectedAccount || !source) return null;
-    return processCsv(csvText, selectedAccount, source, state.botTrades || []);
-  }, [csvText, selectedAccount, source, state.botTrades]);
+    return processCsv(csvText, selectedAccount, source, state.botTrades || [], { tz: csvTz, feesIncluded });
+  }, [csvText, selectedAccount, source, state.botTrades, csvTz, feesIncluded]);
 
   const handleFileChoose = (file) => {
     if (!file) return;
@@ -182,6 +188,35 @@ export default function ImportBotTrades({ state, importBotTrades }) {
               >
                 <X size={16} />
               </button>
+            </div>
+
+            {/* Interpretation options */}
+            <div className="flex flex-wrap items-center gap-4 p-3 rounded-xl text-xs" style={{ background: 'var(--surface)' }}>
+              <label className="flex items-center gap-2">
+                <span style={{ color: 'var(--text-dim)' }}>CSV times are in</span>
+                <select
+                  value={csvTz}
+                  onChange={(e) => setCsvTz(e.target.value)}
+                  className="px-2 py-1 rounded-md border-0 cursor-pointer"
+                  style={{ background: 'var(--card)', color: 'var(--text)' }}
+                >
+                  <option value="America/New_York">US Eastern (futures standard)</option>
+                  <option value="America/Chicago">US Central (CME)</option>
+                  <option value="UTC">UTC</option>
+                  <option value="local">This computer's timezone</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={feesIncluded}
+                  onChange={(e) => setFeesIncluded(e.target.checked)}
+                />
+                <span style={{ color: 'var(--text-dim)' }}>
+                  P&L column already includes fees
+                  <span className="opacity-60"> (uncheck to subtract the Fees column separately)</span>
+                </span>
+              </label>
             </div>
 
             {/* Detected mapping */}
@@ -328,7 +363,7 @@ function PreviewTable({ processed, accountName }) {
           {sample.map((t, i) => (
             <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
               <td className="px-2 py-1.5 text-white">{t.symbol}</td>
-              <td className="px-2 py-1.5 text-white uppercase">{t.side}</td>
+              <td className="px-2 py-1.5 text-white uppercase">{t.side || '—'}</td>
               <td className="px-2 py-1.5 text-right text-white">{t.qty}</td>
               <td className="px-2 py-1.5 text-gray-400">{fmtTs(t.exit_ts)}</td>
               <td className="px-2 py-1.5 text-right font-mono" style={{ color: t.pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{formatPnl(t.pnl)}</td>

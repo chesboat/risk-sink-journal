@@ -13,7 +13,11 @@ import {
   CloudOff,
   LogOut,
   Monitor,
+  Download,
+  History,
 } from 'lucide-react'
+import { exportData } from '../lib/store'
+import { listSnapshots, downloadSnapshot } from '../lib/backup'
 import MobileDashboard from './MobileDashboard'
 import MobileCalendar from './MobileCalendar'
 import MobileTradeLog from './MobileTradeLog'
@@ -280,6 +284,39 @@ export default function MobileShell({
                     {user.email}
                   </div>
                 )}
+                <button
+                  onClick={() => {
+                    exportData(state)
+                    setMenuOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer border-0 text-left"
+                  style={{ background: 'var(--card)', color: 'var(--text)' }}
+                >
+                  <Download size={16} />
+                  <span className="text-sm font-medium">Export backup (JSON)</span>
+                </button>
+                {user && (() => {
+                  const snaps = listSnapshots(user.id)
+                  return (
+                    <button
+                      onClick={() => {
+                        if (snaps.length === 0) { alert('No local snapshots yet — one is saved automatically each day you open the journal.'); return }
+                        downloadSnapshot(snaps[0])
+                        setMenuOpen(false)
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer border-0 text-left"
+                      style={{ background: 'var(--card)', color: 'var(--text)' }}
+                    >
+                      <History size={16} />
+                      <span className="text-sm font-medium">
+                        Download latest snapshot
+                        {snaps.length > 0 && (
+                          <span className="opacity-50"> ({snaps[0].date})</span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })()}
                 <button
                   onClick={() => {
                     setMenuOpen(false)
