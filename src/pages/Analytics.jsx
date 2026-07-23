@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid, AreaChart, Area, ReferenceLine, ComposedChart } from 'recharts'
 import { TrendingUp, Zap, Target, Smile, Shield, Info } from 'lucide-react'
-import { calcStats, calcPooledHealth, getIdeaResult, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
+import { calcStats, calcPooledHealth, calcTagStats, getIdeaResult, SESSIONS, SETUPS, EMOTIONS } from '../lib/store'
 
 const COLORS = {
   green: '#30d158',
@@ -24,7 +24,31 @@ export default function Analytics({ state }) {
   const [showPooledInfo, setShowPooledInfo] = useState(false)
   const [showMaxDdInfo, setShowMaxDdInfo] = useState(false)
   const [curveView, setCurveView] = useState('combined')
-  const stats = calcStats(state.trades, 'all')
+
+  // ── Date range ── every tab computes from rangedTrades so you can isolate
+  // a single eval period. Pooled health stays all-time: trailing floors and
+  // peaks are account state, not period stats.
+  const [range, setRange] = useState('all') // 'week' | 'month' | 'all' | 'custom'
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const inRange = (t) => {
+    if (range === 'week') {
+      const weekAgo = new Date()
+      weekAgo.setDate(weekAgo.getDate() - 7)
+      return new Date(t.date + 'T00:00:00') >= weekAgo
+    }
+    if (range === 'month') {
+      const now = new Date()
+      const d = new Date(t.date + 'T00:00:00')
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    }
+    if (range === 'custom') {
+      return (!customStart || t.date >= customStart) && (!customEnd || t.date <= customEnd)
+    }
+    return true
+  }
+  const rangedTrades = (state.trades || []).filter(inRange)
+  const stats = calcStats(rangedTrades, 'all')
 
   // Format percentage
   const pct = (n) => {
@@ -46,7 +70,7 @@ export default function Analytics({ state }) {
     // result. Untriggered / still-open ideas used to land in the '0' bucket
     // and masquerade as break-evens.
     const rBuckets = { '-3': 0, '-2': 0, '-1': 0, '0': 0, '1': 0, '2': 0, '3': 0, '4': 0, '5+': 0 }
-    state.trades.filter(t => t.entries.some(e => e.triggered && e.result)).forEach(t => {
+    rangedTrades.filter(t => t.entries.some(e => e.triggered && e.result)).forEach(t => {
       const r = Math.round(t.entries.reduce((s, e) => {
         if (!e.triggered) return s
         if (e.result === 'W') return s + (e.r || 0)
@@ -77,7 +101,7 @@ export default function Analytics({ state }) {
     // Profit factor (standard definition): gross winning entry P&L divided by
     // gross losing entry P&L. The old version divided winning DAYS by losing
     // DAYS, which is a different (and unlabeled) statistic.
-    const triggeredEntries = state.trades.flatMap(t => (t.entries || []).filter(e => e.triggered))
+    const triggeredEntries = rangedTrades.flatMap(t => (t.entries || []).filter(e => e.triggered))
     const grossWin = triggeredEntries.reduce((s, e) => s + Math.max(0, e.pnl || 0), 0)
     const grossLoss = Math.abs(triggeredEntries.reduce((s, e) => s + Math.min(0, e.pnl || 0), 0))
     const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : (grossWin > 0 ? '∞' : '0')
@@ -136,7 +160,10 @@ export default function Analytics({ state }) {
                   <Info size={14} className="text-white" />
                 </button>
               </div>
-              <div className="text-xs text-white opacity-50">All {pooled.perAccount.length} accounts treated as one system</div>
+              <div className="text-xs text-white opacity-50">
+                All {pooled.perAccount.length} accounts treated as one system
+                {range !== 'all' && <span className="opacity-70"> · always all-time (ignores date filter)</span>}
+              </div>
             </div>
             <div className="text-right">
               <div className="text-3xl font-bold" style={{ color: pooled.combinedPnl >= 0 ? COLORS.green : COLORS.red }}>
@@ -577,6 +604,17 @@ export default function Analytics({ state }) {
             <div className="text-4xl font-bold text-white mb-4">{profitFactor}</div>
             <div className="text-xs text-white opacity-50">Total R: {Math.round(stats.totalR)}</div>
             <div className="text-xs text-white opacity-50 mt-1">Total P&L: {fmt(stats.totalPnl)}</div>
+            <div className="border-t mt-3 pt-3 space-y-1" style={{ borderColor: 'var(--border)' }}>
+              <div className="text-xs text-white opacity-50">
+                Expectancy: <span className="font-semibold" style={{ color: stats.expectancyPnl >= 0 ? COLORS.green : COLORS.red }}>{fmt(stats.expectancyPnl)}</span> / idea
+              </div>
+              <div className="text-xs text-white opacity-50">
+                Avg win {fmt(stats.avgWinPnl)} · avg loss {fmt(-stats.avgLossPnl)}
+              </div>
+              <div className="text-xs text-white opacity-50">
+                Payoff ratio: {stats.payoffRatio === Infinity ? '∞' : (stats.payoffRatio || 0).toFixed(2)}
+              </div>
+            </div>
           </motion.div>
         </div>
       </div>
@@ -838,7 +876,7 @@ export default function Analytics({ state }) {
   // TAB 5: STREAKS
   // ════════════════════════════════════════════════════════════════════════
   const StreaksTab = () => {
-    const results = state.trades
+    const results = rangedTrades
       .filter(t => {
         const triggered = t.entries.filter(e => e.triggered)
         return triggered.length > 0 && triggered.some(e => e.result)
@@ -1021,6 +1059,78 @@ export default function Analytics({ state }) {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  // TAB 7: TAGS
+  // ════════════════════════════════════════════════════════════════════════
+  const TagsTab = () => {
+    const tagStats = calcTagStats(rangedTrades)
+
+    if (tagStats.length === 0) {
+      return (
+        <div className="rounded-2xl p-8 border text-center" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+          <div className="text-sm text-white opacity-50">No tagged trades in this period yet</div>
+          <div className="text-xs text-white opacity-40 mt-1">Tag mistakes, confirmations, and conditions when logging trades to see which ones make or cost you money.</div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-6">
+        {tagStats.map(cat => (
+          <motion.div
+            key={cat.key}
+            className="rounded-2xl p-6 border"
+            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+            {...tabTransition}
+          >
+            <div className="flex items-baseline justify-between mb-4">
+              <h3 className="text-sm font-semibold" style={{ color: cat.color }}>{cat.label}</h3>
+              {cat.key === 'mistakes' && (
+                <span className="text-[11px] text-white opacity-40">ranked by damage</span>
+              )}
+            </div>
+            <div className="space-y-2">
+              {cat.tags.map(t => (
+                <div
+                  key={t.tag}
+                  className="rounded-xl p-3 flex items-center justify-between gap-4"
+                  style={{ background: 'var(--surface)' }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-white truncate">{t.tag}</div>
+                    <div className="text-[11px] text-white opacity-50">{t.ideas} idea{t.ideas === 1 ? '' : 's'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] text-white opacity-50">WR</div>
+                    <div className="text-sm font-semibold text-white">{pct(t.wr)}</div>
+                  </div>
+                  <div className="text-right w-20">
+                    <div className="text-[11px] text-white opacity-50">Net P&L</div>
+                    <div className="text-sm font-semibold" style={{ color: t.pnl >= 0 ? COLORS.green : COLORS.red }}>
+                      {fmt(t.pnl)}
+                    </div>
+                  </div>
+                  <div className="text-right w-20">
+                    <div className="text-[11px] text-white opacity-50">Avg / idea</div>
+                    <div className="text-sm font-mono" style={{ color: t.avgPnl >= 0 ? COLORS.green : COLORS.red }}>
+                      {fmt(t.avgPnl)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {cat.key === 'mistakes' && cat.tags.some(t => t.pnl < 0) && (
+              <div className="text-xs text-white opacity-60 mt-4 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                Ideas tagged <span className="font-semibold">{cat.tags[0].tag}</span> have cost you{' '}
+                <span className="font-semibold" style={{ color: COLORS.red }}>{fmt(cat.tags[0].pnl)}</span> — the single most expensive habit in this period.
+              </div>
+            )}
+          </motion.div>
+        ))}
+      </div>
+    )
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════════════════
   const tabs = [
@@ -1028,16 +1138,64 @@ export default function Analytics({ state }) {
     { id: 'entry', label: 'By Entry' },
     { id: 'session', label: 'By Session' },
     { id: 'setup', label: 'By Setup' },
+    { id: 'tags', label: 'Tags' },
     { id: 'streaks', label: 'Streaks' },
     { id: 'emotions', label: 'Emotions' },
+  ]
+
+  const rangeChips = [
+    { id: 'week', label: 'Week' },
+    { id: 'month', label: 'Month' },
+    { id: 'all', label: 'All Time' },
+    { id: 'custom', label: 'Custom' },
   ]
 
   return (
     <div>
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Analytics</h1>
-        <p className="text-sm text-white opacity-60">Deep dive into your trading performance</p>
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Analytics</h1>
+          <p className="text-sm text-white opacity-60">Deep dive into your trading performance</p>
+        </div>
+
+        {/* Date range */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--surface)' }}>
+            {rangeChips.map(chip => (
+              <button
+                key={chip.id}
+                onClick={() => setRange(chip.id)}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all border-0 cursor-pointer"
+                style={{
+                  background: range === chip.id ? 'var(--card)' : 'transparent',
+                  color: range === chip.id ? 'var(--text)' : 'var(--text-dim)',
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+          {range === 'custom' && (
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-2 py-1.5 rounded-lg text-xs border"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              />
+              <span className="text-xs opacity-50">→</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-2 py-1.5 rounded-lg text-xs border"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -1069,6 +1227,7 @@ export default function Analytics({ state }) {
         {activeTab === 'entry' && <ByEntryTab />}
         {activeTab === 'session' && <BySessionTab />}
         {activeTab === 'setup' && <BySetupTab />}
+        {activeTab === 'tags' && <TagsTab />}
         {activeTab === 'streaks' && <StreaksTab />}
         {activeTab === 'emotions' && <EmotionsTab />}
       </motion.div>

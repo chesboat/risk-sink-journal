@@ -8,10 +8,11 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, Target, Zap, DollarSign, Award, Info, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, Target, Zap, DollarSign, Award, Info, X, ChevronLeft, ChevronRight, LifeBuoy } from 'lucide-react';
 import {
   calcStats,
   calcRiskScore,
+  calcRiskSinkLift,
   getIdeaResult,
   getNetR,
   getNetPnl,
@@ -499,6 +500,170 @@ const AccountHealthCard = ({ account, stats }) => {
           </p>
         </div>
       </div>
+    </motion.div>
+  );
+};
+
+// ── Risk Sink Payoff Card ──
+// Answers one question in plain English: is trading the same idea across
+// 3 accounts actually making more money than a single account would?
+const RiskSinkLiftCard = ({ trades }) => {
+  const [showInfo, setShowInfo] = useState(false);
+  const lift = calcRiskSinkLift(trades || []);
+
+  // Only meaningful once at least one idea used E2 or E3
+  const usedLaterEntries = (trades || []).some(t =>
+    (t.entries || []).some(e => e.slot > 1 && e.triggered)
+  );
+
+  const ahead = lift.liftPnl > 0;
+  const behind = lift.liftPnl < 0;
+  const verdictColor = ahead ? 'var(--green)' : behind ? 'var(--red)' : 'var(--text-dim)';
+
+  // Horizontal comparison bars, scaled to the larger of the two outcomes
+  const maxAbs = Math.max(Math.abs(lift.actualPnl), Math.abs(lift.basePnl), 1);
+  const barPct = (v) => Math.max(3, (Math.abs(v) / maxAbs) * 100);
+
+  const CompareBar = ({ label, value, highlight }) => (
+    <div>
+      <div className="flex justify-between items-baseline mb-1">
+        <span className="text-xs opacity-70">{label}</span>
+        <span className="text-sm font-mono font-bold" style={{ color: value >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {formatPnl(value)}
+        </span>
+      </div>
+      <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+        <motion.div
+          className="h-full rounded-full"
+          initial={{ width: 0 }}
+          animate={{ width: `${barPct(value)}%` }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+          style={{
+            background: value >= 0 ? 'var(--green)' : 'var(--red)',
+            opacity: highlight ? 1 : 0.35,
+          }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.15 }}
+      className="rounded-[14px] p-5 border"
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text)' }}>
+          <LifeBuoy size={16} style={{ color: 'var(--accent)' }} />
+          Is the Risk Sink Paying Off?
+        </h3>
+        <button
+          onClick={() => setShowInfo(!showInfo)}
+          className="p-1 rounded-md transition-colors border-0 bg-transparent cursor-pointer"
+          style={{ color: 'var(--text)', opacity: 0.4 }}
+          title="What is this?"
+        >
+          {showInfo ? <X size={14} /> : <Info size={14} />}
+        </button>
+      </div>
+      <p className="text-xs opacity-50 mb-4">Your 3-account system vs. taking only the first entry</p>
+
+      {showInfo && (
+        <div className="mb-4 rounded-lg p-3 text-xs leading-relaxed" style={{ background: 'var(--surface)', opacity: 0.9 }}>
+          The whole point of risk-sinking is the re-entry: when E1 stops out, you take the
+          same idea again on E2, then E3. This card replays your journal as if you had
+          traded <span className="font-semibold">only E1 and stopped there</span>, and compares
+          it to what all your entries actually made. If the green number below is positive,
+          the extra entries are earning their keep.
+        </div>
+      )}
+
+      {!usedLaterEntries ? (
+        <div className="py-6 text-center text-xs opacity-50">
+          Log ideas that use E2 or E3 and this card will show whether those
+          re-entries are making you money.
+        </div>
+      ) : (
+        <>
+          {/* Verdict */}
+          <div className="mb-4">
+            <span className="text-3xl font-bold font-mono" style={{ color: verdictColor }}>
+              {formatPnl(lift.liftPnl)}
+            </span>
+            <span className="text-xs opacity-60 ml-2">
+              {ahead ? 'extra profit from entries 2 & 3' : behind ? 'given up by entries 2 & 3' : 'no difference so far'}
+            </span>
+          </div>
+
+          {/* The two worlds, side by side */}
+          <div className="space-y-3 mb-4">
+            <CompareBar label="What you actually made (all entries)" value={lift.actualPnl} highlight />
+            <CompareBar label="What E1 alone would have made" value={lift.basePnl} />
+          </div>
+
+          {/* Rescues */}
+          <div
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+            style={{ background: 'var(--surface)' }}
+          >
+            <LifeBuoy size={14} style={{ color: lift.rescues > 0 ? 'var(--green)' : 'var(--text-muted)' }} />
+            {lift.rescues > 0 ? (
+              <span>
+                <span className="font-bold" style={{ color: 'var(--green)' }}>{lift.rescues} rescue{lift.rescues === 1 ? '' : 's'}</span>
+                {' '}— ideas where E1 lost but a later entry turned it green
+                {lift.liftR !== 0 && <span className="opacity-60"> · {lift.liftR > 0 ? '+' : ''}{lift.liftR.toFixed(1)}R total lift</span>}
+              </span>
+            ) : (
+              <span className="opacity-60">No rescues yet — no idea has lost E1 and then won on E2/E3</span>
+            )}
+          </div>
+        </>
+      )}
+    </motion.div>
+  );
+};
+
+// ── Edge Card ── expectancy & payoff for the selected period
+const EdgeCard = ({ stats, periodLabel }) => {
+  const payoff = stats.payoffRatio === Infinity ? '∞' : (stats.payoffRatio || 0).toFixed(2);
+  const Row = ({ label, children }) => (
+    <div className="flex items-baseline justify-between py-1.5">
+      <span className="text-xs opacity-60">{label}</span>
+      <span className="text-sm font-mono font-bold">{children}</span>
+    </div>
+  );
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+      className="rounded-[14px] p-5 border"
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text)' }}>Your Edge</h3>
+      <p className="text-xs opacity-50 mb-3">Per completed idea · {periodLabel}</p>
+      {stats.totalTrades === 0 ? (
+        <div className="py-4 text-center text-xs opacity-50">No completed ideas in this period yet.</div>
+      ) : (
+        <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+          <Row label="Expectancy">
+            <span style={{ color: stats.expectancyPnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {formatPnl(stats.expectancyPnl)}
+            </span>
+          </Row>
+          <Row label="Expectancy (R)">
+            <span style={{ color: stats.expectancyR >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {stats.expectancyR >= 0 ? '+' : ''}{stats.expectancyR.toFixed(2)}R
+            </span>
+          </Row>
+          <Row label="Avg win"><span style={{ color: 'var(--green)' }}>{formatPnl(stats.avgWinPnl)}</span></Row>
+          <Row label="Avg loss"><span style={{ color: 'var(--red)' }}>{formatPnl(-stats.avgLossPnl)}</span></Row>
+          <Row label="Payoff ratio">{payoff}</Row>
+        </div>
+      )}
     </motion.div>
   );
 };
@@ -1041,6 +1206,12 @@ export default function Dashboard({ state, openEditTrade }) {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Row 3.5: Risk Sink Payoff + Edge */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '2fr 1fr' }}>
+        <RiskSinkLiftCard trades={state.trades} />
+        <EdgeCard stats={stats} periodLabel={periodLabel} />
       </div>
 
       {/* Row 4: Mini Calendar (full width) */}

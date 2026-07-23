@@ -494,6 +494,10 @@ export function calcStats(trades, period = 'all') {
       const d = new Date(t.date + 'T00:00:00');
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     });
+  } else if (period && typeof period === 'object') {
+    // Custom range: { start, end } as YYYY-MM-DD (inclusive, either optional)
+    const { start, end } = period;
+    filtered = trades.filter(t => (!start || t.date >= start) && (!end || t.date <= end));
   }
 
   const completedTrades = filtered.filter(t => getIdeaResult(t) !== null);
@@ -600,11 +604,29 @@ export function calcStats(trades, period = 'all') {
     return { date, daily: dailyPnl[date], cumulative };
   });
 
+  // Expectancy & payoff — completed ideas only, so open trades can't
+  // dilute the averages
+  const completedPnls = completedTrades.map(getNetPnl);
+  const completedRs = completedTrades.map(getNetR);
+  const winPnls = wins.map(getNetPnl);
+  const lossPnls = losses.map(getNetPnl);
+  const avg = (arr) => (arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0);
+  const expectancyPnl = avg(completedPnls);
+  const expectancyR = avg(completedRs);
+  const avgWinPnl = avg(winPnls);
+  const avgLossPnl = Math.abs(avg(lossPnls));
+  const payoffRatio = avgLossPnl > 0 ? avgWinPnl / avgLossPnl : (avgWinPnl > 0 ? Infinity : 0);
+
   return {
     totalTrades: completedTrades.length,
     ideaWins: wins.length,
     ideaLosses: losses.length,
     ideaWR: completedTrades.length > 0 ? wins.length / completedTrades.length : 0,
+    expectancyPnl,
+    expectancyR,
+    avgWinPnl,
+    avgLossPnl,
+    payoffRatio,
     totalEntries: allEntries.length,
     entryWins: entryWins.length,
     entryLosses: entryLosses.length,
@@ -622,6 +644,32 @@ export function calcStats(trades, period = 'all') {
     equityCurve,
     dailyPnl,
   };
+}
+
+// ── Tag performance ──
+// Aggregates completed ideas per tag within each tag category: how often a
+// tag appears, its idea win rate, and its net P&L. This is where "Moved Stop
+// cost me $1,400" comes from. Custom (user-added) tags are included because
+// aggregation iterates the tags actually present on trades, not the presets.
+export function calcTagStats(trades) {
+  const completed = (trades || []).filter(t => getIdeaResult(t) !== null);
+  return TAG_CATEGORIES.map(cat => {
+    const byTag = {};
+    completed.forEach(t => {
+      (t.tags?.[cat.key] || []).forEach(tag => {
+        if (!byTag[tag]) byTag[tag] = { tag, ideas: 0, wins: 0, pnl: 0, totalR: 0 };
+        byTag[tag].ideas++;
+        if (getIdeaResult(t) === 'WIN') byTag[tag].wins++;
+        byTag[tag].pnl += getNetPnl(t);
+        byTag[tag].totalR += getNetR(t);
+      });
+    });
+    const tags = Object.values(byTag)
+      .map(x => ({ ...x, wr: x.ideas > 0 ? x.wins / x.ideas : 0, avgPnl: x.ideas > 0 ? x.pnl / x.ideas : 0 }))
+      // Mistakes ranked most-damaging first; everything else by impact size
+      .sort((a, b) => cat.key === 'mistakes' ? a.pnl - b.pnl : Math.abs(b.pnl) - Math.abs(a.pnl));
+    return { key: cat.key, label: cat.label, color: cat.color, tags };
+  }).filter(c => c.tags.length > 0);
 }
 
 // ── Risk Sink Score ──
