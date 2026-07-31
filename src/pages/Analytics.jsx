@@ -1171,8 +1171,8 @@ export default function Analytics({ state }) {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--surface)' }}>
-              {['Account', 'Entries', 'Win Rate', 'Journal P&L', 'Total P&L', 'PT Progress', 'MLL Used'].map((h, i) => (
-                <th key={h} className={`px-4 py-3 text-xs font-semibold text-white opacity-60 ${i === 0 ? 'text-left' : 'text-right'}`}>
+              {['Account', 'Entries', 'Win Rate', 'PF', 'Exp / entry', 'Journal P&L', 'Total P&L', 'Max DD', 'PT', 'MLL Used'].map((h, i) => (
+                <th key={h} className={`px-3 py-3 text-xs font-semibold text-white opacity-60 ${i === 0 ? 'text-left' : 'text-right'}`}>
                   {h}
                 </th>
               ))}
@@ -1198,16 +1198,25 @@ export default function Analytics({ state }) {
                       {a.archivedAt ? ` · to ${a.archivedAt.slice(0, 10)}` : ''}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right text-white">{s.totalEntries}</td>
-                  <td className="px-4 py-3 text-right text-white">{pct(s.slotWR)}</td>
-                  <td className="px-4 py-3 text-right font-mono" style={{ color: s.journalPnl >= 0 ? COLORS.green : COLORS.red }}>
+                  <td className="px-3 py-3 text-right text-white">{s.totalEntries}</td>
+                  <td className="px-3 py-3 text-right text-white">{pct(s.slotWR)}</td>
+                  <td className="px-3 py-3 text-right font-mono" style={{ color: s.profitFactor >= 1 ? COLORS.green : s.totalEntries > 0 ? COLORS.red : 'var(--text-dim)' }}>
+                    {s.totalEntries === 0 ? '—' : s.profitFactor === Infinity ? '∞' : s.profitFactor.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-3 text-right font-mono" style={{ color: s.expectancyPerEntry >= 0 ? COLORS.green : COLORS.red }}>
+                    {s.totalEntries === 0 ? '—' : fmt(s.expectancyPerEntry)}
+                  </td>
+                  <td className="px-3 py-3 text-right font-mono" style={{ color: s.journalPnl >= 0 ? COLORS.green : COLORS.red }}>
                     {fmt(s.journalPnl)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono font-semibold" style={{ color: s.totalPnl >= 0 ? COLORS.green : COLORS.red }}>
+                  <td className="px-3 py-3 text-right font-mono font-semibold" style={{ color: s.totalPnl >= 0 ? COLORS.green : COLORS.red }}>
                     {fmt(s.totalPnl)}
                   </td>
-                  <td className="px-4 py-3 text-right text-white">{Math.round(s.ptPercent || 0)}%</td>
-                  <td className="px-4 py-3 text-right" style={{ color: s.mllPercent > 50 ? COLORS.green : s.mllPercent > 25 ? COLORS.orange : COLORS.red }}>
+                  <td className="px-3 py-3 text-right font-mono" style={{ color: s.maxDrawdown > 0 ? COLORS.red : 'var(--text-dim)' }}>
+                    {s.maxDrawdown > 0 ? `-$${Math.round(s.maxDrawdown)}` : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-right text-white">{Math.round(s.ptPercent || 0)}%</td>
+                  <td className="px-3 py-3 text-right" style={{ color: s.mllPercent > 50 ? COLORS.green : s.mllPercent > 25 ? COLORS.orange : COLORS.red }}>
                     {Math.round(100 - (s.mllPercent || 0))}%
                   </td>
                 </tr>
@@ -1215,9 +1224,12 @@ export default function Analytics({ state }) {
             })}
           </tbody>
         </table>
-        <div className="px-4 py-2.5 text-[11px] text-white opacity-40" style={{ background: 'var(--surface)' }}>
+        <div className="px-4 py-2.5 text-[11px] text-white opacity-40 leading-relaxed" style={{ background: 'var(--surface)' }}>
           Each account only counts trades from its own era (archived accounts keep their history).
-          Journal P&L respects the date filter; Total P&L adds the account's starting P&L.
+          Journal P&L, PF, expectancy, and Max DD respect the date filter; Total P&L adds the account's starting P&L.
+          <br />
+          Remember these accounts aren't independent: E2 only fires after E1 stops out, and E3 after E2 —
+          so E2/E3's PF and win rate measure what <span className="font-semibold">re-entries</span> earn, not standalone account skill.
         </div>
       </motion.div>
     )

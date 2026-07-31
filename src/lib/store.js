@@ -1165,6 +1165,37 @@ export function getAccountStats(account, trades, settings) {
   const wins = entries.filter(e => e.result === 'W');
   const slotWR = entries.length > 0 ? wins.length / entries.length : 0;
 
+  // Per-account edge metrics over this account's (windowed) entries.
+  // Caveat for risk-sink accounts: E2/E3 only fire after earlier entries
+  // stopped out, so these read as "what re-entries earn", not independent
+  // account skill.
+  const entryPnls = entries.map(e => Number(e.pnl) || 0);
+  const losers = entryPnls.filter(p => p < 0);
+  const grossWin = entryPnls.reduce((s, p) => s + Math.max(0, p), 0);
+  const grossLoss = Math.abs(entryPnls.reduce((s, p) => s + Math.min(0, p), 0));
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : 0);
+  const expectancyPerEntry = entries.length > 0
+    ? entryPnls.reduce((s, p) => s + p, 0) / entries.length
+    : 0;
+
+  // Max drawdown of THIS account's equity (chronological, window-aware)
+  const chrono = [...owned].sort((a, b) => {
+    const da = new Date(a.date + 'T00:00:00').getTime();
+    const db = new Date(b.date + 'T00:00:00').getTime();
+    if (da !== db) return da - db;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+  let running = account.startingPnl || 0;
+  let ddPeak = running;
+  let maxDrawdown = 0;
+  chrono.forEach(t => {
+    const e = (t.entries || []).find(x => x.slot === account.slot && x.triggered);
+    if (!e) return;
+    running += Number(e.pnl) || 0;
+    if (running > ddPeak) ddPeak = running;
+    if (ddPeak - running > maxDrawdown) maxDrawdown = ddPeak - running;
+  });
+
   return {
     journalPnl,
     totalPnl,
@@ -1182,6 +1213,13 @@ export function getAccountStats(account, trades, settings) {
     ptPercent: (ptProgress / s.profitTarget) * 100,
     slotWR,
     totalEntries: entries.length,
+    grossWin,
+    grossLoss,
+    profitFactor,
+    expectancyPerEntry,
+    avgWin: wins.length > 0 ? grossWin / wins.length : 0,
+    avgLoss: losers.length > 0 ? grossLoss / losers.length : 0,
+    maxDrawdown,
   };
 }
 
