@@ -507,7 +507,9 @@ const AccountHealthCard = ({ account, stats }) => {
 // ── Risk Sink Payoff Card ──
 // Answers one question in plain English: is trading the same idea across
 // 3 accounts actually making more money than a single account would?
-const RiskSinkLiftCard = ({ trades }) => {
+// Follows the Dashboard's Week/Month/All-Time period tabs like its
+// neighbors — All Time spans the whole journal, archived eras included.
+const RiskSinkLiftCard = ({ trades, period }) => {
   const [showInfo, setShowInfo] = useState(false);
   const lift = calcRiskSinkLift(trades || []);
 
@@ -569,22 +571,26 @@ const RiskSinkLiftCard = ({ trades }) => {
           {showInfo ? <X size={14} /> : <Info size={14} />}
         </button>
       </div>
-      <p className="text-xs opacity-50 mb-4">Your 3-account system vs. taking only the first entry</p>
+      <p className="text-xs opacity-50 mb-4">
+        Your 3-account system vs. taking only the first entry
+        <span className="opacity-70"> · {period === 'All Time' ? 'all time, archived eras included' : period === 'Week' ? 'this week' : 'this month'}</span>
+      </p>
 
       {showInfo && (
         <div className="mb-4 rounded-lg p-3 text-xs leading-relaxed" style={{ background: 'var(--surface)', opacity: 0.9 }}>
-          The whole point of risk-sinking is the re-entry: when E1 stops out, you take the
-          same idea again on E2, then E3. This card replays your journal as if you had
-          traded <span className="font-semibold">only E1 and stopped there</span>, and compares
-          it to what all your entries actually made. If the green number below is positive,
-          the extra entries are earning their keep.
+          The whole point of risk-sinking is the extra entries: the same idea gets taken
+          again on E2 and E3 — at deeper prices while E1 is still working, or as re-entries
+          after a stop-out, depending on your style. This card replays your journal as if
+          you had traded <span className="font-semibold">only E1 and stopped there</span>,
+          and compares it to what all your entries actually made. If the green number below
+          is positive, the extra entries are earning their keep.
         </div>
       )}
 
       {!usedLaterEntries ? (
         <div className="py-6 text-center text-xs opacity-50">
-          Log ideas that use E2 or E3 and this card will show whether those
-          re-entries are making you money.
+          Log ideas that use E2 or E3 in this period and this card will show
+          whether those extra entries are making you money.
         </div>
       ) : (
         <>
@@ -1073,6 +1079,25 @@ export default function Dashboard({ state, openEditTrade }) {
     E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: decisive(stats.byEntry?.[2]) },
   };
 
+  // Trades narrowed to the selected period — feeds the Payoff card so it
+  // agrees with the other period-scoped cards (mirrors calcStats' filters).
+  const periodTrades = useMemo(() => {
+    const all = state.trades || [];
+    const now = new Date();
+    if (period === 'Week') {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return all.filter(t => new Date(t.date + 'T00:00:00') >= weekAgo);
+    }
+    if (period === 'Month') {
+      return all.filter(t => {
+        const d = new Date(t.date + 'T00:00:00');
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      });
+    }
+    return all;
+  }, [state.trades, period]);
+
   // Active manual accounts only for the risk-sink stats panels below (bot
   // accounts have their own card grid; archived accounts live on the Accounts page).
   const manualAccounts = useMemo(() => getActiveManualAccounts(state.accounts || []), [state.accounts]);
@@ -1210,7 +1235,7 @@ export default function Dashboard({ state, openEditTrade }) {
 
       {/* Row 3.5: Risk Sink Payoff + Edge */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '2fr 1fr' }}>
-        <RiskSinkLiftCard trades={state.trades} />
+        <RiskSinkLiftCard trades={periodTrades} period={period} />
         <EdgeCard stats={stats} periodLabel={periodLabel} />
       </div>
 

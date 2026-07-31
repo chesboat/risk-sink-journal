@@ -1228,8 +1228,9 @@ export default function Analytics({ state }) {
           Each account only counts trades from its own era (archived accounts keep their history).
           Journal P&L, PF, expectancy, and Max DD respect the date filter; Total P&L adds the account's starting P&L.
           <br />
-          Remember these accounts aren't independent: E2 only fires after E1 stops out, and E3 after E2 —
-          so E2/E3's PF and win rate measure what <span className="font-semibold">re-entries</span> earn, not standalone account skill.
+          Remember these accounts aren't independent: E2/E3 only fire when the idea offers a deeper
+          entry (or after earlier entries stop out, depending on style) — their PF and win rate measure
+          what the <span className="font-semibold">extra entries</span> earn, not standalone account skill.
         </div>
       </motion.div>
     )

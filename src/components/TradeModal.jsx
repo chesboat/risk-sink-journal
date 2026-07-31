@@ -62,7 +62,7 @@ function SectionLabel({ children }) {
 // ENTRY ROW
 // ═══════════════════════════════════════════════════
 
-function EntryRow({ slot, entry, onChange, instrument }) {
+function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
   const colors = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' }
   const c = colors[slot]
   // Optional price capture — lets the app DERIVE risk $ and R instead of
@@ -159,7 +159,15 @@ function EntryRow({ slot, entry, onChange, instrument }) {
       {entry.triggered && (
         <div className="mt-2">
           <button
-            onClick={() => setShowDetails(v => !v)}
+            onClick={() => {
+              // Shared-stop convenience: with one stop for all entries
+              // (building-position style), typing it once is enough — the
+              // other entries inherit it when their details open.
+              if (!showDetails && entry.stopPrice == null && sharedStop != null) {
+                onChange({ ...entry, stopPrice: sharedStop })
+              }
+              setShowDetails(v => !v)
+            }}
             className="text-[11px] border-0 bg-transparent cursor-pointer p-0"
             style={{ color: 'var(--text-muted)' }}
           >
@@ -601,7 +609,14 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
                   </p>
                 </div>
                 {form.entries.map((e, i) => (
-                  <EntryRow key={i} slot={e.slot} entry={e} instrument={form.instrument} onChange={(val) => updateEntry(i, val)} />
+                  <EntryRow
+                    key={i}
+                    slot={e.slot}
+                    entry={e}
+                    instrument={form.instrument}
+                    sharedStop={form.entries.find(x => x.stopPrice != null)?.stopPrice ?? null}
+                    onChange={(val) => updateEntry(i, val)}
+                  />
                 ))}
               </motion.div>
             )}
