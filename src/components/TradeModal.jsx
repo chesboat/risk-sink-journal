@@ -467,9 +467,15 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
     <motion.div
       className="fixed inset-0 z-[100] flex items-center justify-center"
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1, pointerEvents: 'auto' }}
-      exit={{ opacity: 0, pointerEvents: 'none' }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
+      // pointerEvents is set via style, never animated: framer-motion can't
+      // resolve an animation on it, so AnimatePresence never completed the
+      // exit and the modal NEVER UNMOUNTED. Closed modals piled up invisibly,
+      // each still holding its Escape / Cmd+Enter / paste listeners — so a
+      // later keystroke could re-save a stale trade over a newer one.
+      style={{ pointerEvents: 'auto' }}
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={requestClose} />
       <motion.div

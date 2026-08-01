@@ -1123,6 +1123,27 @@ const SettingsSection = ({ settings, onSettingsChange }) => {
             />
           </div>
         </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-400">Risk per Entry</label>
+          <div className="flex items-center">
+            <span className="text-gray-400 mr-2">$</span>
+            <input
+              type="number"
+              value={settings.riskPerEntry ?? 200}
+              onChange={(e) => handleChange('riskPerEntry', e.target.value)}
+              className="flex-1 px-3 py-2 rounded-xl border text-white"
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: 'var(--border)',
+              }}
+            />
+          </div>
+          <span className="text-[11px] text-gray-500">
+            Target risk for each entry — the Risk Sink Score grades how close your logged
+            contracts/prices land to it.
+          </span>
+        </div>
       </div>
     </motion.div>
   );

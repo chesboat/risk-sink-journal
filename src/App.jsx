@@ -52,6 +52,7 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showModal, setShowModal] = useState(false)
   const [editTrade, setEditTrade] = useState(null)
+  const [modalKey, setModalKey] = useState(0)
   const [viewTrade, setViewTrade] = useState(null)
   const [prevPage, setPrevPage] = useState(null)
   const [sidebarHover, setSidebarHover] = useState(false)
@@ -396,20 +397,24 @@ export default function App() {
     })
   }, [state.settings.customTags, updateSettings])
 
-  const openNewTrade = () => {
-    setEditTrade(null)
+  // Bumped on every open so <TradeModal key=...> remounts. Without it the
+  // modal can survive its close animation and be reused on the next open,
+  // keeping the PREVIOUS trade's id in form state — so the next trade you
+  // log silently overwrites the last one instead of adding a new row.
+  const openModal = (trade) => {
+    setEditTrade(trade)
+    setModalKey(k => k + 1)
     setShowModal(true)
   }
+
+  const openNewTrade = () => openModal(null)
 
   const openViewTrade = (trade) => {
     setPrevPage(page)
     setViewTrade(trade)
   }
 
-  const openEditTrade = (trade) => {
-    setEditTrade(trade)
-    setShowModal(true)
-  }
+  const openEditTrade = (trade) => openModal(trade)
 
   // Duplicate: opens the modal with a NEW trade pre-filled from an existing
   // one (setup context copied, entries/journal reset). Saving goes through
@@ -562,17 +567,21 @@ export default function App() {
           signOut={signOut}
           forceDesktop={forceDesktop}
         />
-        <AnimatePresence>
-          {showModal && (
-            <TradeModal
-              trade={editTrade}
-              onSave={saveFromModal}
-              onClose={() => { setShowModal(false); setEditTrade(null) }}
-              customTags={state.settings.customTags || {}}
-              onAddCustomTag={addCustomTag}
-            />
-          )}
-        </AnimatePresence>
+        {/* NOT wrapped in AnimatePresence: its exit never completed for this
+            modal, so closed modals stayed mounted forever — each keeping its
+            Escape / Cmd+Enter / paste listeners and its own stale copy of the
+            form. Six opens meant six live save handlers. Correctness beats a
+            fade-out; the modal still animates IN. */}
+        {showModal && (
+          <TradeModal
+            key={`${editTrade?.id || "new"}-${modalKey}`}
+            trade={editTrade}
+            onSave={saveFromModal}
+            onClose={() => { setShowModal(false); setEditTrade(null) }}
+            customTags={state.settings.customTags || {}}
+            onAddCustomTag={addCustomTag}
+          />
+        )}
       </>
     )
   }
@@ -720,16 +729,16 @@ export default function App() {
         New Trade
       </motion.button>
 
-      {/* Trade Modal */}
-      <AnimatePresence>
-        {showModal && (
-          <TradeModal
-            trade={editTrade}
-            onSave={saveFromModal}
-            onClose={() => { setShowModal(false); setEditTrade(null) }}
-          />
-        )}
-      </AnimatePresence>
+      {/* Trade Modal — see the mobile branch above for why this is not
+          wrapped in AnimatePresence. */}
+      {showModal && (
+        <TradeModal
+          key={`${editTrade?.id || "new"}-${modalKey}`}
+          trade={editTrade}
+          onSave={saveFromModal}
+          onClose={() => { setShowModal(false); setEditTrade(null) }}
+        />
+      )}
 
       {/* Local snapshots */}
       {showSnapshots && user && (

@@ -46,6 +46,16 @@ export const TAG_CATEGORIES = [
   { key: 'mistakes',      label: 'Mistakes',          options: MISTAKES,          color: 'var(--red)'    },
 ];
 
+// Today's date in the USER'S timezone as YYYY-MM-DD.
+// Never use new Date().toISOString().slice(0,10) for this: that's the UTC
+// date, so anyone west of UTC logging an evening session gets stamped with
+// TOMORROW's date (8pm ET = midnight UTC). Every filter in the app compares
+// local dates, so a UTC stamp lands the trade on the wrong day, the wrong
+// week, and — at month end — outside "this month" entirely.
+export function todayLocal(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export const ENTRY_COLORS = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' };
 export const ENTRY_LABELS = { 1: 'E1 · 3R', 2: 'E2 · 4R', 3: 'E3 · 5R' };
 export const ENTRY_TARGETS = { 1: 3, 2: 4, 3: 5 };
@@ -69,6 +79,9 @@ export function getDefaultState() {
       mll: 2000,
       profitTarget: 3000,
       accountSize: 50000,
+      // Target dollar risk per entry — with a shared stop across accounts,
+      // each entry is sized to risk this same amount. Grades "Risk control".
+      riskPerEntry: 200,
       // User-added tags persist here so they reappear on the next trade
       customTags: {
         confirmations: [],
@@ -466,7 +479,7 @@ export function createTrade(overrides = {}) {
   const last = lastTradeDefaults();
   return {
     id: crypto.randomUUID(),
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocal(),
     instrument: last.instrument || 'MNQ',
     session: last.session || 'New York AM',
     setup: last.setup || '',
@@ -716,80 +729,149 @@ export function calcTagStats(trades) {
 }
 
 // ── Risk Sink Score ──
+//
+// Grades BEHAVIOR YOU CONTROL, not state you inherited. Design rules:
+//   • Every component is a score 0-100 with the underlying stat exposed as
+//     `detail`, so the card can never present a score as if it were the raw
+//     statistic (the old version showed a capped WR score labeled "Idea WR").
+//   • A component that can't be measured yet is EXCLUDED and the remaining
+//     weights renormalize — no silent 50s, no free 100s.
+//   • The final score is shrunk toward 50 by sample size, so a handful of
+//     ideas can't read as "Elite".
+//   • Style-neutral: nothing rewards firing all three entries. With a shared
+//     stop, an idea that wins on E1 alone is a GREAT outcome, not poor
+//     discipline (the old "avg entries ÷ 3" metric punished exactly that).
+export const SCORE_WEIGHTS = {
+  edge: 0.30,
+  riskControl: 0.20,
+  drawdown: 0.20,
+  process: 0.15,
+  consistency: 0.15,
+};
+export const SCORE_MIN_SAMPLE = 5;      // below this, no score at all
+export const SCORE_FULL_CONFIDENCE = 30; // ideas needed for an unshrunk score
+
+const clamp01to100 = (n) => Math.max(0, Math.min(100, n));
+
+export function scoreLabel(score) {
+  return score >= 80 ? 'Elite'
+    : score >= 65 ? 'Strong'
+    : score >= 50 ? 'Developing'
+    : score >= 35 ? 'Needs Work'
+    : 'Critical';
+}
+
 export function calcRiskScore(trades, accounts, settings) {
-  const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
-  // Risk Sink Score is a manual-strategy metric (idea WR, entry discipline,
-  // pooled MLL, etc). Filter bot and archived accounts out so they don't
-  // inflate maxMll — the score reflects the currently-live account set.
-  const a = getActiveManualAccounts(accounts || []);
-  if (!trades || trades.length < 3) return { score: 0, grades: {}, label: 'Not enough data' };
+  const s = settings || {};
+  const riskPerEntry = s.riskPerEntry || 200;
+  const all = trades || [];
+  const completed = all.filter(t => getIdeaResult(t) !== null);
+  const n = completed.length;
 
-  const stats = calcStats(trades, 'all');
+  if (n < SCORE_MIN_SAMPLE) {
+    return {
+      score: 0,
+      label: 'Not enough data',
+      sampleSize: n,
+      needed: SCORE_MIN_SAMPLE - n,
+      confidence: 0,
+      components: [],
+    };
+  }
 
-  // 1. Idea WR (25%) — target: 40%+ is great
-  const wrScore = Math.min(100, (stats.ideaWR / 0.5) * 100);
+  const stats = calcStats(all, 'all');
+  const pooled = calcPooledHealth(all, accounts, s);
+  const components = [];
+  const add = (key, label, score, detail, measured = true, hint = null) =>
+    components.push({ key, label, weight: SCORE_WEIGHTS[key], score: Math.round(score), detail, measured, hint });
 
-  // 2. Entry Discipline (20%) — are you using all 3 entries consistently?
-  const tradesWithEntries = trades.filter(t => t.entries.some(e => e.triggered));
-  const avgEntriesPerTrade = tradesWithEntries.length > 0
-    ? tradesWithEntries.reduce((sum, t) => sum + t.entries.filter(e => e.triggered).length, 0) / tradesWithEntries.length
-    : 0;
-  const disciplineScore = Math.min(100, (avgEntriesPerTrade / 3) * 100);
+  // ── 1. EDGE (30%) — expectancy in R per completed idea.
+  // Breakeven maps to 50; +2R/idea maxes it. This is the component the old
+  // score lacked entirely: nothing in it cared whether you made money.
+  const expR = stats.expectancyR || 0;
+  add('edge', 'Edge', clamp01to100(50 + expR * 25),
+    `${expR >= 0 ? '+' : ''}${expR.toFixed(2)}R per idea · ${formatPnl(stats.expectancyPnl || 0)} avg`);
 
-  // 3. MLL Management (20%) — how much buffer remains across accounts (trailing-aware).
-  // Uses distance-to-bust from trailing MLL, capped per account at mll_initial.
-  const totalMllRemaining = a.reduce((sum, acc) => {
-    const trailing = calcTrailingMll(acc, trades, s);
-    return sum + Math.max(0, Math.min(s.mll, trailing.distanceToBust));
-  }, 0);
-  const maxMll = a.length * s.mll;
-  const mllScore = maxMll > 0 ? (totalMllRemaining / maxMll) * 100 : 100;
-
-  // 4. Consistency (20%) — low variance in daily PnL
-  const dailyValues = Object.values(stats.dailyPnl);
-  if (dailyValues.length < 2) {
-    var consistencyScore = 50;
+  // ── 2. RISK CONTROL (20%) — did each entry actually risk the target $?
+  // Only measurable once contracts/entry/stop prices are logged.
+  const risks = [];
+  all.forEach(t => (t.entries || []).forEach(e => {
+    if (!e.triggered) return;
+    const derived = deriveEntryRisk(e, t.instrument);
+    if (derived) risks.push(derived.riskDollars);
+  }));
+  if (risks.length >= 3) {
+    const avgDev = risks.reduce((sum, d) => sum + Math.abs(d - riskPerEntry) / riskPerEntry, 0) / risks.length;
+    // 0% drift = 100, 25% avg drift = 50, 50%+ = 0
+    add('riskControl', 'Risk control', clamp01to100(100 - avgDev * 200),
+      `avg ${Math.round(avgDev * 100)}% off your $${riskPerEntry} target · ${risks.length} entries priced`);
   } else {
-    const mean = dailyValues.reduce((s, v) => s + v, 0) / dailyValues.length;
-    const variance = dailyValues.reduce((s, v) => s + (v - mean) ** 2, 0) / dailyValues.length;
-    const stdDev = Math.sqrt(variance);
-    const cv = mean !== 0 ? Math.abs(stdDev / mean) : 10;
-    var consistencyScore = Math.max(0, Math.min(100, 100 - cv * 20));
+    add('riskControl', 'Risk control', 0, 'not measured', false,
+      'Log contracts + entry & stop prices on entries to grade your sizing.');
   }
 
-  // 5. Emotion Quality (15%) — WR when calm/confident vs anxious/fomo/revenge
-  const calmTrades = trades.filter(t => ['Calm', 'Confident'].includes(t.emotion) && getIdeaResult(t));
-  const stressTrades = trades.filter(t => ['Anxious', 'FOMO', 'Revenge', 'Frustrated'].includes(t.emotion) && getIdeaResult(t));
-  let emotionScore = 50;
-  if (calmTrades.length > 0) {
-    const calmWR = calmTrades.filter(t => getIdeaResult(t) === 'WIN').length / calmTrades.length;
-    emotionScore = calmWR * 100;
-    if (stressTrades.length > 0) {
-      const stressRatio = stressTrades.length / (calmTrades.length + stressTrades.length);
-      emotionScore = emotionScore * (1 - stressRatio * 0.3);
-    }
+  // ── 3. DRAWDOWN DISCIPLINE (20%) — how deep you dug into the POOLED
+  // buffer (3 accounts × per-account MLL). Measures damage taken, not
+  // buffer inherited: fresh accounts don't get a free 100 forever, and one
+  // idea can hit all three accounts at once.
+  if (pooled.pooledMll > 0) {
+    const ddShare = pooled.maxDd / pooled.pooledMll;
+    // 0% of pool = 100, 33% = 50, 66%+ = 0
+    add('drawdown', 'Drawdown control', clamp01to100(100 - ddShare * 150),
+      `worst -$${Math.round(pooled.maxDd).toLocaleString()} of $${pooled.pooledMll.toLocaleString()} pooled (${Math.round(ddShare * 100)}%)`);
+  } else {
+    add('drawdown', 'Drawdown control', 0, 'not measured', false, 'No active accounts configured.');
   }
 
-  const score = Math.round(
-    wrScore * 0.25 +
-    disciplineScore * 0.20 +
-    mllScore * 0.20 +
-    consistencyScore * 0.20 +
-    emotionScore * 0.15
-  );
+  // ── 4. PROCESS (15%) — self-reported mistakes per idea. Only graded if
+  // you actually tag trades, so non-taggers aren't scored on silence.
+  const anyTagged = completed.some(t => Object.values(t.tags || {}).some(arr => arr?.length > 0));
+  if (anyTagged) {
+    const mistakes = completed.reduce((sum, t) => sum + (t.tags?.mistakes?.length || 0), 0);
+    const perIdea = mistakes / n;
+    // clean = 100, 1 mistake per idea = 50, 2+ = 0
+    add('process', 'Process', clamp01to100(100 - perIdea * 50),
+      `${mistakes} mistake tag${mistakes === 1 ? '' : 's'} across ${n} ideas`);
+  } else {
+    add('process', 'Process', 0, 'not measured', false,
+      'Tag mistakes when logging trades to grade execution discipline.');
+  }
 
-  const label = score >= 80 ? 'Elite' : score >= 65 ? 'Strong' : score >= 50 ? 'Developing' : score >= 35 ? 'Needs Work' : 'Critical';
+  // ── 5. CONSISTENCY (15%) — best day as a share of total profit. This is
+  // the rule prop firms actually enforce for payouts, and unlike the old
+  // coefficient-of-variation metric it doesn't punish you for a big green day
+  // (it only cares that profit isn't concentrated in one session).
+  const dailyValues = Object.values(stats.dailyPnl || {});
+  const totalNet = dailyValues.reduce((sum, v) => sum + v, 0);
+  const bestDay = dailyValues.length > 0 ? Math.max(...dailyValues) : 0;
+  if (dailyValues.length >= 3 && totalNet > 0 && bestDay > 0) {
+    const share = bestDay / totalNet;
+    // ≤30% of profit in one day = 100, 100% in one day = 0
+    add('consistency', 'Consistency', clamp01to100(((1 - share) / 0.7) * 100),
+      `best day is ${Math.round(share * 100)}% of total profit · ${dailyValues.length} trading days`);
+  } else {
+    add('consistency', 'Consistency', 0, 'not measured', false,
+      totalNet > 0 ? 'Needs 3+ trading days.' : 'Needs a net-positive stretch to measure profit concentration.');
+  }
+
+  // ── Combine: renormalize over measured components only ──
+  const measured = components.filter(c => c.measured);
+  const totalWeight = measured.reduce((sum, c) => sum + c.weight, 0);
+  const raw = totalWeight > 0
+    ? measured.reduce((sum, c) => sum + c.score * c.weight, 0) / totalWeight
+    : 50;
+
+  // ── Confidence: shrink toward neutral until the sample supports the claim ──
+  const confidence = Math.max(0, Math.min(1, n / SCORE_FULL_CONFIDENCE));
+  const score = Math.round(50 + (raw - 50) * confidence);
 
   return {
-    score: Math.min(100, Math.max(0, score)),
-    label,
-    grades: {
-      ideaWR: Math.round(wrScore),
-      discipline: Math.round(disciplineScore),
-      mll: Math.round(mllScore),
-      consistency: Math.round(consistencyScore),
-      emotion: Math.round(emotionScore),
-    },
+    score: clamp01to100(score),
+    rawScore: Math.round(raw),
+    label: scoreLabel(score),
+    sampleSize: n,
+    confidence,
+    components,
   };
 }
 
@@ -1226,7 +1308,7 @@ export function getAccountStats(account, trades, settings) {
 // ── Behavioral Flags ──
 export function getBehavioralFlags(trades) {
   const flags = [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
 
   // Overtrading: >3 ideas in a single day
   const byDate = {};
@@ -1348,7 +1430,7 @@ export function createManualAccount({ name, slot, startingPnl = 0 } = {}) {
     health: 'Eval',
     startingPnl: Number(startingPnl) || 0,
     history: [],
-    activeFrom: new Date().toISOString().slice(0, 10),
+    activeFrom: todayLocal(),
   };
 }
 

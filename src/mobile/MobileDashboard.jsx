@@ -10,6 +10,7 @@ import {
   getAccountStats,
   getActiveManualAccounts,
   formatCurrency,
+  todayLocal,
 } from '../lib/store'
 
 function StatCard({ label, value, sub, color, icon: Icon }) {
@@ -45,7 +46,7 @@ export default function MobileDashboard({ state, openViewTrade }) {
   )
 
   // Today P&L
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = todayLocal()
   const todayTrades = (state.trades || []).filter((t) => t.date === todayStr)
   const todayPnl = todayTrades.reduce((s, t) => s + getNetPnl(t), 0)
 

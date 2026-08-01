@@ -13,6 +13,7 @@ import {
   calcStats,
   calcRiskScore,
   calcRiskSinkLift,
+  SCORE_FULL_CONFIDENCE,
   getIdeaResult,
   getNetR,
   getNetPnl,
@@ -131,24 +132,18 @@ const StatCard = ({
 };
 
 // Risk Sink Score Card
-const RiskScoreCard = ({ score, breakdown }) => {
+// Every row shows the component SCORE and the stat behind it, so a score can
+// never be mistaken for the raw statistic. Unmeasured components are shown
+// greyed with what to log to unlock them, and never counted.
+const RiskScoreCard = ({ riskScore, periodLabel }) => {
   const [showInfo, setShowInfo] = useState(false);
+  const { score, label, components = [], sampleSize = 0, confidence = 0, needed } = riskScore || {};
 
-  // Bands mirror calcRiskScore's labels in store.js — color, grade word, and
-  // the info tooltip all describe the same thresholds.
-  const getScoreColor = (s) => {
-    if (s >= 65) return 'var(--green)';
-    if (s >= 35) return 'var(--orange)';
-    return 'var(--red)';
-  };
+  const scoreColor = (s) => (s >= 65 ? 'var(--green)' : s >= 35 ? 'var(--orange)' : 'var(--red)');
 
-  const getScoreGrade = (s) => {
-    if (s >= 80) return 'Elite';
-    if (s >= 65) return 'Strong';
-    if (s >= 50) return 'Developing';
-    if (s >= 35) return 'Needs Work';
-    return 'Critical';
-  };
+  const confidenceNote = confidence >= 1
+    ? `${sampleSize} ideas · full confidence`
+    : `${sampleSize} idea${sampleSize === 1 ? '' : 's'} · ${confidence >= 0.5 ? 'medium' : 'low'} confidence — score pulled toward 50 until ${SCORE_FULL_CONFIDENCE}`;
 
   return (
     <motion.div
@@ -156,21 +151,16 @@ const RiskScoreCard = ({ score, breakdown }) => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: 0.1 }}
       className="rounded-[14px] p-5 border relative"
-      style={{
-        background: 'var(--card)',
-        borderColor: 'var(--border)',
-      }}
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
     >
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
           Risk Sink Score
         </h3>
         <button
           onClick={() => setShowInfo(!showInfo)}
-          className="p-1 rounded-md transition-colors"
+          className="p-1 rounded-md transition-colors border-0 bg-transparent cursor-pointer"
           style={{ color: 'var(--text)', opacity: 0.4 }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-          onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
           title="How Risk Sink Score works"
         >
           {showInfo ? <X size={14} /> : <Info size={14} />}
@@ -178,77 +168,83 @@ const RiskScoreCard = ({ score, breakdown }) => {
       </div>
 
       {showInfo && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
+        <div
           className="mb-5 rounded-lg p-3 text-xs leading-relaxed"
-          style={{ background: 'var(--surface)', color: 'var(--text)', opacity: 0.85 }}
+          style={{ background: 'var(--surface)', color: 'var(--text)', opacity: 0.9 }}
         >
-          <p className="font-semibold mb-2">How the score is calculated:</p>
+          <p className="font-semibold mb-2">What it grades ({periodLabel}):</p>
           <div className="space-y-1.5" style={{ opacity: 0.8 }}>
-            <p><span className="font-mono font-semibold">25%</span> — Idea Win Rate: % of trade ideas that are net profitable</p>
-            <p><span className="font-mono font-semibold">20%</span> — Entry Discipline: how well entries follow the plan (triggered vs. not)</p>
-            <p><span className="font-mono font-semibold">20%</span> — MLL Management: staying within max loss limits per account</p>
-            <p><span className="font-mono font-semibold">20%</span> — Consistency: even distribution of R across trades (low variance)</p>
-            <p><span className="font-mono font-semibold">15%</span> — Emotion Quality: absence of revenge trades, FOMO entries, and tilt</p>
+            <p><span className="font-mono font-semibold">30%</span> — <span className="font-semibold">Edge</span>: expectancy in R per idea. Breakeven scores 50.</p>
+            <p><span className="font-mono font-semibold">20%</span> — <span className="font-semibold">Risk control</span>: how close each entry's real risk lands to your target.</p>
+            <p><span className="font-mono font-semibold">20%</span> — <span className="font-semibold">Drawdown control</span>: worst dip against your <em>pooled</em> buffer (all accounts combined).</p>
+            <p><span className="font-mono font-semibold">15%</span> — <span className="font-semibold">Process</span>: mistake tags per idea.</p>
+            <p><span className="font-mono font-semibold">15%</span> — <span className="font-semibold">Consistency</span>: best day as a share of total profit — the rule prop firms enforce for payouts.</p>
           </div>
-          <p className="mt-2" style={{ opacity: 0.6 }}>Score ranges: 80+ Elite · 65+ Strong · 50+ Developing · 35+ Needs Work · &lt;35 Critical</p>
-        </motion.div>
+          <p className="mt-2" style={{ opacity: 0.6 }}>
+            Anything not yet measurable is excluded and the other weights renormalize.
+            The result is shrunk toward 50 until you have {SCORE_FULL_CONFIDENCE} completed ideas.
+          </p>
+          <p className="mt-2" style={{ opacity: 0.6 }}>80+ Elite · 65+ Strong · 50+ Developing · 35+ Needs Work · &lt;35 Critical</p>
+        </div>
       )}
 
-      <div className="flex flex-col gap-5">
-        {/* Score Circle */}
-        <div className="flex items-center gap-4">
-          <div
-            className="relative w-20 h-20 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{
-              background: `radial-gradient(circle, ${getScoreColor(score)}20 0%, transparent 70%)`,
-            }}
-          >
+      {needed != null ? (
+        <div className="py-8 text-center">
+          <div className="text-3xl font-bold font-mono opacity-30">—</div>
+          <p className="text-xs opacity-60 mt-2">
+            {needed} more completed idea{needed === 1 ? '' : 's'} needed before scoring
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {/* Score */}
+          <div className="flex items-center gap-4">
             <div
-              className="text-3xl font-bold font-mono"
-              style={{ color: getScoreColor(score) }}
+              className="relative w-20 h-20 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: `radial-gradient(circle, ${scoreColor(score)}20 0%, transparent 70%)` }}
             >
-              {Math.round(score)}
+              <div className="text-3xl font-bold font-mono" style={{ color: scoreColor(score) }}>
+                {Math.round(score)}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: scoreColor(score) }}>{label}</p>
+              <p className="text-[11px] opacity-50 mt-0.5 leading-snug">{confidenceNote}</p>
             </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold" style={{ color: getScoreColor(score) }}>
-              {getScoreGrade(score)}
-            </p>
-            <p className="text-xs opacity-50 mt-0.5">Overall Grade</p>
-          </div>
-        </div>
 
-        {/* Grade Breakdown */}
-        <div className="flex flex-col gap-3">
-          {Object.entries(breakdown || {}).map(([key, percentage]) => (
-            <div key={key}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-medium capitalize opacity-70">
-                  {key.replace(/([A-Z])/g, ' $1').trim()}
-                </span>
-                <span className="text-xs font-mono opacity-60">
-                  {Math.round(percentage)}%
-                </span>
+          {/* Components */}
+          <div className="flex flex-col gap-3">
+            {components.map((c) => (
+              <div key={c.key} style={{ opacity: c.measured ? 1 : 0.45 }}>
+                <div className="flex justify-between items-baseline mb-1 gap-2">
+                  <span className="text-xs font-medium opacity-70">
+                    {c.label}
+                    <span className="opacity-40 font-mono ml-1">{Math.round(c.weight * 100)}%</span>
+                  </span>
+                  <span className="text-xs font-mono opacity-60">
+                    {c.measured ? c.score : '—'}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                  {c.measured && (
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${c.score}%` }}
+                      transition={{ duration: 1, ease: 'easeOut' }}
+                      className="h-full rounded-full"
+                      style={{ background: scoreColor(c.score) }}
+                    />
+                  )}
+                </div>
+                <div className="text-[11px] mt-1 leading-snug" style={{ color: 'var(--text-dim)', opacity: 0.7 }}>
+                  {c.measured ? c.detail : c.hint}
+                </div>
               </div>
-              <div
-                className="h-1.5 rounded-full overflow-hidden"
-                style={{ background: 'var(--border)' }}
-              >
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${percentage}%` }}
-                  transition={{ duration: 1, ease: 'easeOut' }}
-                  className="h-full rounded-full"
-                  style={{ background: 'var(--green)' }}
-                />
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </motion.div>
   );
 };
@@ -1068,19 +1064,10 @@ export default function Dashboard({ state, openEditTrade }) {
   // Calculate stats
   const periodMap = { 'Week': 'week', 'Month': 'month', 'All Time': 'all' };
   const stats = calcStats(state.trades || [], periodMap[period] || 'month');
-  const riskScore = calcRiskScore(state.trades || [], state.accounts || [], state.settings);
 
-  // Entry performance from stats.byEntry. `total` is decisive entries (W+L,
-  // break-evens excluded) so the WR here matches byEntry.wr and Analytics.
-  const decisive = (e) => (e?.wins || 0) + (e?.losses || 0);
-  const entryPerformance = {
-    E1: { wins: (stats.byEntry?.[0]?.wins || 0), total: decisive(stats.byEntry?.[0]) },
-    E2: { wins: (stats.byEntry?.[1]?.wins || 0), total: decisive(stats.byEntry?.[1]) },
-    E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: decisive(stats.byEntry?.[2]) },
-  };
-
-  // Trades narrowed to the selected period — feeds the Payoff card so it
-  // agrees with the other period-scoped cards (mirrors calcStats' filters).
+  // Trades narrowed to the selected period — feeds the Payoff card and the
+  // Risk Sink Score so they agree with the other period-scoped cards
+  // (mirrors calcStats' filters).
   const periodTrades = useMemo(() => {
     const all = state.trades || [];
     const now = new Date();
@@ -1097,6 +1084,20 @@ export default function Dashboard({ state, openEditTrade }) {
     }
     return all;
   }, [state.trades, period]);
+
+  const riskScore = useMemo(
+    () => calcRiskScore(periodTrades, state.accounts || [], state.settings),
+    [periodTrades, state.accounts, state.settings]
+  );
+
+  // Entry performance from stats.byEntry. `total` is decisive entries (W+L,
+  // break-evens excluded) so the WR here matches byEntry.wr and Analytics.
+  const decisive = (e) => (e?.wins || 0) + (e?.losses || 0);
+  const entryPerformance = {
+    E1: { wins: (stats.byEntry?.[0]?.wins || 0), total: decisive(stats.byEntry?.[0]) },
+    E2: { wins: (stats.byEntry?.[1]?.wins || 0), total: decisive(stats.byEntry?.[1]) },
+    E3: { wins: (stats.byEntry?.[2]?.wins || 0), total: decisive(stats.byEntry?.[2]) },
+  };
 
   // Active manual accounts only for the risk-sink stats panels below (bot
   // accounts have their own card grid; archived accounts live on the Accounts page).
@@ -1212,7 +1213,7 @@ export default function Dashboard({ state, openEditTrade }) {
 
       {/* Row 2: Risk Score (1/3) + Equity Curve (2/3) */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 2fr' }}>
-        <RiskScoreCard score={riskScore.score || 0} breakdown={riskScore.grades || {}} />
+        <RiskScoreCard riskScore={riskScore} periodLabel={periodLabel} />
         <EquityCurveChart data={stats.equityCurve} />
       </div>
 
