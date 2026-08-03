@@ -761,25 +761,41 @@ export function scoreLabel(score) {
     : 'Critical';
 }
 
+// Rolling window: the score always grades the LAST 30 completed ideas
+// (SCORE_FULL_CONFIDENCE), regardless of calendar periods. A behavior grade
+// that reset every month asked for "5 more ideas" on the 1st despite months
+// of history; a rolling window has no boundary resets and old-era trades
+// age out naturally as new ones are logged.
 export function calcRiskScore(trades, accounts, settings) {
   const s = settings || {};
   const riskPerEntry = s.riskPerEntry || 200;
   const all = trades || [];
-  const completed = all.filter(t => getIdeaResult(t) !== null);
-  const n = completed.length;
+  const allCompleted = all.filter(t => getIdeaResult(t) !== null);
 
-  if (n < SCORE_MIN_SAMPLE) {
+  if (allCompleted.length < SCORE_MIN_SAMPLE) {
     return {
       score: 0,
       label: 'Not enough data',
-      sampleSize: n,
-      needed: SCORE_MIN_SAMPLE - n,
+      sampleSize: allCompleted.length,
+      needed: SCORE_MIN_SAMPLE - allCompleted.length,
       confidence: 0,
       components: [],
     };
   }
 
-  const stats = calcStats(all, 'all');
+  const recent = [...allCompleted]
+    .sort((a, b) => {
+      const da = new Date(a.date + 'T00:00:00').getTime();
+      const db = new Date(b.date + 'T00:00:00').getTime();
+      if (da !== db) return da - db;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    })
+    .slice(-SCORE_FULL_CONFIDENCE);
+  const n = recent.length;
+
+  const stats = calcStats(recent, 'all');
+  // Pooled drawdown stays all-trades: trailing floors and peaks are account
+  // state, not a sample of behavior (account windows handle the eras).
   const pooled = calcPooledHealth(all, accounts, s);
   const components = [];
   const add = (key, label, score, detail, measured = true, hint = null) =>
@@ -795,7 +811,7 @@ export function calcRiskScore(trades, accounts, settings) {
   // ── 2. RISK CONTROL (20%) — did each entry actually risk the target $?
   // Only measurable once contracts/entry/stop prices are logged.
   const risks = [];
-  all.forEach(t => (t.entries || []).forEach(e => {
+  recent.forEach(t => (t.entries || []).forEach(e => {
     if (!e.triggered) return;
     const derived = deriveEntryRisk(e, t.instrument);
     if (derived) risks.push(derived.riskDollars);
@@ -825,9 +841,9 @@ export function calcRiskScore(trades, accounts, settings) {
 
   // ── 4. PROCESS (15%) — self-reported mistakes per idea. Only graded if
   // you actually tag trades, so non-taggers aren't scored on silence.
-  const anyTagged = completed.some(t => Object.values(t.tags || {}).some(arr => arr?.length > 0));
+  const anyTagged = recent.some(t => Object.values(t.tags || {}).some(arr => arr?.length > 0));
   if (anyTagged) {
-    const mistakes = completed.reduce((sum, t) => sum + (t.tags?.mistakes?.length || 0), 0);
+    const mistakes = recent.reduce((sum, t) => sum + (t.tags?.mistakes?.length || 0), 0);
     const perIdea = mistakes / n;
     // clean = 100, 1 mistake per idea = 50, 2+ = 0
     add('process', 'Process', clamp01to100(100 - perIdea * 50),

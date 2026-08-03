@@ -153,7 +153,7 @@ const RiskScoreCard = ({ riskScore, periodLabel }) => {
       className="rounded-[14px] p-5 border relative"
       style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-1">
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
           Risk Sink Score
         </h3>
@@ -166,13 +166,14 @@ const RiskScoreCard = ({ riskScore, periodLabel }) => {
           {showInfo ? <X size={14} /> : <Info size={14} />}
         </button>
       </div>
+      <p className="text-xs opacity-50 mb-4">Rolling · your last {SCORE_FULL_CONFIDENCE} completed ideas</p>
 
       {showInfo && (
         <div
           className="mb-5 rounded-lg p-3 text-xs leading-relaxed"
           style={{ background: 'var(--surface)', color: 'var(--text)', opacity: 0.9 }}
         >
-          <p className="font-semibold mb-2">What it grades ({periodLabel}):</p>
+          <p className="font-semibold mb-2">What it grades (rolling window — the period tabs don't apply here):</p>
           <div className="space-y-1.5" style={{ opacity: 0.8 }}>
             <p><span className="font-mono font-semibold">30%</span> — <span className="font-semibold">Edge</span>: expectancy in R per idea. Breakeven scores 50.</p>
             <p><span className="font-mono font-semibold">20%</span> — <span className="font-semibold">Risk control</span>: how close each entry's real risk lands to your target.</p>
@@ -1085,9 +1086,12 @@ export default function Dashboard({ state, openEditTrade }) {
     return all;
   }, [state.trades, period]);
 
+  // Deliberately NOT period-scoped: the score grades a rolling window of
+  // the last 30 completed ideas (see calcRiskScore), so it never resets at
+  // a month boundary and never claims "not enough data" on the 1st.
   const riskScore = useMemo(
-    () => calcRiskScore(periodTrades, state.accounts || [], state.settings),
-    [periodTrades, state.accounts, state.settings]
+    () => calcRiskScore(state.trades || [], state.accounts || [], state.settings),
+    [state.trades, state.accounts, state.settings]
   );
 
   // Entry performance from stats.byEntry. `total` is decisive entries (W+L,
@@ -1106,13 +1110,10 @@ export default function Dashboard({ state, openEditTrade }) {
     getAccountStats(account, state.trades || [], state.settings)
   );
 
-  // This week's idea WR vs the selected period's average. Hidden when the
-  // period IS the week (comparing a number to itself said nothing).
-  const weekStats = calcStats(state.trades || [], 'week');
-  const weekWrPct = (weekStats.ideaWR || 0) * 100;
-  const periodWrPct = (stats.ideaWR || 0) * 100;
-  const wrDiff = period === 'Week' ? 0 : weekWrPct - periodWrPct;
-  const wrDiffLabel = period === 'All Time' ? 'vs all-time avg' : 'vs month avg';
+  // (The old "this week vs month avg" delta subtitle is gone: a rolling
+  // 7-day window crossing a month boundary against a 1-trade month average
+  // produced alarming nonsense like "↓40%" next to a 100% win rate. The
+  // subtitle now states the period's W/L record — a fact, not a comparison.)
 
   // Period label for subtitles
   const periodLabel = period === 'Week' ? 'this week' : period === 'Month' ? new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'all time';
@@ -1162,8 +1163,7 @@ export default function Dashboard({ state, openEditTrade }) {
             value={ideaWr}
             suffix="%"
             valueColor="var(--green)"
-            subtitle={wrDiff !== 0 ? `this week ${wrDiff > 0 ? '↑' : '↓'} ${Math.abs(wrDiff).toFixed(1)}% ${wrDiffLabel}` : undefined}
-            subtitleColor={wrDiff >= 0 ? 'var(--green)' : 'var(--red)'}
+            subtitle={stats.totalTrades > 0 ? `${stats.ideaWins}W / ${stats.ideaLosses}L · ${periodLabel}` : undefined}
             fullHeight
           />
           <motion.div
