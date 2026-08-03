@@ -62,7 +62,7 @@ function SectionLabel({ children }) {
 // ENTRY ROW
 // ═══════════════════════════════════════════════════
 
-function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
+function EntryRow({ slot, entry, onChange, instrument, sharedStop, riskPerEntry = 200 }) {
   const colors = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' }
   const c = colors[slot]
   // Optional price capture — lets the app DERIVE risk $ and R instead of
@@ -72,6 +72,23 @@ function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
   )
   const risk = deriveEntryRisk(entry, instrument)
   const numOrNull = (v) => (v === '' ? null : parseFloat(v))
+
+  // ── Auto-P&L ── with fixed $-risk per entry, dollars are derivable:
+  // W = R × risk, L = −risk, BE = 0. The minimal log becomes result + R;
+  // the $ field auto-fills but stays editable (a manual value is never
+  // overwritten — we only replace what we previously derived).
+  const autoPnl = (result, r) =>
+    result === 'W' ? Math.round((r || 0) * riskPerEntry)
+      : result === 'L' ? -riskPerEntry
+        : result === 'BE' ? 0
+          : null
+  const withAutoPnl = (next) => {
+    const prevAuto = autoPnl(entry.result, entry.r)
+    const untouched = !entry.pnl || entry.pnl === prevAuto
+    if (!untouched) return next
+    const derived = autoPnl(next.result, next.r)
+    return derived === null ? next : { ...next, pnl: derived }
+  }
   const detailField = (key, label, step) => (
     <div className="flex-1">
       <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
@@ -113,7 +130,7 @@ function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
             {['W', 'L', 'BE'].map(r => (
               <button
                 key={r}
-                onClick={() => onChange({ ...entry, result: r })}
+                onClick={() => onChange(withAutoPnl({ ...entry, result: r }))}
                 className="w-10 h-8 rounded-lg text-xs font-bold cursor-pointer border-0 transition-all"
                 style={{
                   background: entry.result === r
@@ -138,7 +155,7 @@ function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
               disabled={entry.result === 'L' || entry.result === 'BE'}
               title={entry.result === 'L' ? 'Losses always count as -1R' : entry.result === 'BE' ? 'Break-evens always count as 0R' : 'Realized R multiple'}
               value={entry.result === 'L' || entry.result === 'BE' ? '' : (entry.r || '')}
-              onChange={e => onChange({ ...entry, r: parseFloat(e.target.value) || 0 })}
+              onChange={e => onChange(withAutoPnl({ ...entry, r: parseFloat(e.target.value) || 0 }))}
               className="w-full px-2 py-1.5 rounded-lg text-sm font-mono outline-none disabled:opacity-40"
               style={{ background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' }}
             />
@@ -147,7 +164,8 @@ function EntryRow({ slot, entry, onChange, instrument, sharedStop }) {
             <input
               type="number"
               step="1"
-              placeholder="$ P&L"
+              placeholder={`$ auto (${riskPerEntry}/R)`}
+              title={`Auto-filled from R × your $${riskPerEntry} risk per entry — type to override with the actual fill`}
               value={entry.pnl || ''}
               onChange={e => onChange({ ...entry, pnl: parseFloat(e.target.value) || 0 })}
               className="w-full px-2 py-1.5 rounded-lg text-sm font-mono outline-none"
@@ -347,7 +365,7 @@ function TagSection({ label, options, selected, onToggle, color, customTags, onA
 // MAIN TRADE MODAL
 // ═══════════════════════════════════════════════════
 
-export default function TradeModal({ trade, onSave, onClose, customTags = {}, onAddCustomTag }) {
+export default function TradeModal({ trade, onSave, onClose, customTags = {}, onAddCustomTag, riskPerEntry = 200 }) {
   // Lazy initializer, built immutably: the old version mutated the parent's
   // trade object during render (backfilling tags/notes in place, even on
   // cancel) and called createTrade() — new UUID and all — every render.
@@ -621,6 +639,7 @@ export default function TradeModal({ trade, onSave, onClose, customTags = {}, on
                     entry={e}
                     instrument={form.instrument}
                     sharedStop={form.entries.find(x => x.stopPrice != null)?.stopPrice ?? null}
+                    riskPerEntry={riskPerEntry}
                     onChange={(val) => updateEntry(i, val)}
                   />
                 ))}

@@ -580,6 +580,7 @@ export default function App() {
             onClose={() => { setShowModal(false); setEditTrade(null) }}
             customTags={state.settings.customTags || {}}
             onAddCustomTag={addCustomTag}
+            riskPerEntry={state.settings.riskPerEntry ?? 200}
           />
         )}
       </>
@@ -737,6 +738,7 @@ export default function App() {
           trade={editTrade}
           onSave={saveFromModal}
           onClose={() => { setShowModal(false); setEditTrade(null) }}
+          riskPerEntry={state.settings.riskPerEntry ?? 200}
         />
       )}
 

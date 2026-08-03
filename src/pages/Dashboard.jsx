@@ -214,36 +214,41 @@ const RiskScoreCard = ({ riskScore, periodLabel }) => {
             </div>
           </div>
 
-          {/* Components */}
+          {/* Measured components — the score is computed from these alone */}
           <div className="flex flex-col gap-3">
-            {components.map((c) => (
-              <div key={c.key} style={{ opacity: c.measured ? 1 : 0.45 }}>
+            {components.filter(c => c.measured).map((c) => (
+              <div key={c.key}>
                 <div className="flex justify-between items-baseline mb-1 gap-2">
                   <span className="text-xs font-medium opacity-70">
                     {c.label}
                     <span className="opacity-40 font-mono ml-1">{Math.round(c.weight * 100)}%</span>
                   </span>
-                  <span className="text-xs font-mono opacity-60">
-                    {c.measured ? c.score : '—'}
-                  </span>
+                  <span className="text-xs font-mono opacity-60">{c.score}</span>
                 </div>
                 <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-                  {c.measured && (
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${c.score}%` }}
-                      transition={{ duration: 1, ease: 'easeOut' }}
-                      className="h-full rounded-full"
-                      style={{ background: scoreColor(c.score) }}
-                    />
-                  )}
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${c.score}%` }}
+                    transition={{ duration: 1, ease: 'easeOut' }}
+                    className="h-full rounded-full"
+                    style={{ background: scoreColor(c.score) }}
+                  />
                 </div>
                 <div className="text-[11px] mt-1 leading-snug" style={{ color: 'var(--text-dim)', opacity: 0.7 }}>
-                  {c.measured ? c.detail : c.hint}
+                  {c.detail}
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Unmeasured components — optional extras, folded into one quiet
+              line so a minimal W/L/R logging style isn't nagged by grey bars */}
+          {components.some(c => !c.measured) && (
+            <div className="text-[11px] leading-snug pt-1 border-t" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)', opacity: 0.6 }}>
+              Not graded (optional): {components.filter(c => !c.measured).map(c => c.label).join(', ')} —
+              the score re-weights without them.
+            </div>
+          )}
         </div>
       )}
     </motion.div>
