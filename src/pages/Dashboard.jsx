@@ -13,6 +13,7 @@ import {
   calcStats,
   calcRiskScore,
   calcRiskSinkLift,
+  startOfWeekLocal,
   SCORE_FULL_CONFIDENCE,
   getIdeaResult,
   getNetR,
@@ -1078,9 +1079,8 @@ export default function Dashboard({ state, openEditTrade }) {
     const all = state.trades || [];
     const now = new Date();
     if (period === 'Week') {
-      const weekAgo = new Date(now);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return all.filter(t => new Date(t.date + 'T00:00:00') >= weekAgo);
+      const weekStart = startOfWeekLocal(now);
+      return all.filter(t => t.date >= weekStart);
     }
     if (period === 'Month') {
       return all.filter(t => {

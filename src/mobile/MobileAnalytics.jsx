@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell, ComposedChart, ReferenceLine, CartesianGrid } from 'recharts'
 import { Shield, Info } from 'lucide-react'
-import { calcStats, calcPooledHealth, formatCurrency } from '../lib/store'
+import { calcStats, calcPooledHealth, formatCurrency, startOfWeekLocal } from '../lib/store'
 
 const PERIODS = [
   { id: 'week', label: 'Week' },
@@ -81,8 +81,8 @@ export default function MobileAnalytics({ state }) {
     let filtered = state.trades || []
     const now = new Date()
     if (period === 'week') {
-      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
-      filtered = filtered.filter((t) => new Date(t.date + 'T00:00:00') >= weekAgo)
+      const weekStart = startOfWeekLocal(now)
+      filtered = filtered.filter((t) => t.date >= weekStart)
     } else if (period === 'month') {
       filtered = filtered.filter((t) => {
         const d = new Date(t.date + 'T00:00:00')

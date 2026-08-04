@@ -56,6 +56,16 @@ export function todayLocal(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// First day (Sunday) of the current LOCAL calendar week, as YYYY-MM-DD.
+// "Week" everywhere means the current Sun–Sat trading week — matching the
+// Calendar page's weekly rows — NOT a rolling 7 days (which straddled
+// months and disagreed with the calendar).
+export function startOfWeekLocal(d = new Date()) {
+  const x = new Date(d);
+  x.setDate(x.getDate() - x.getDay());
+  return todayLocal(x);
+}
+
 export const ENTRY_COLORS = { 1: 'var(--green)', 2: 'var(--orange)', 3: 'var(--teal)' };
 export const ENTRY_LABELS = { 1: 'E1 · 3R', 2: 'E2 · 4R', 3: 'E3 · 5R' };
 export const ENTRY_TARGETS = { 1: 3, 2: 4, 3: 5 };
@@ -542,9 +552,8 @@ export function calcStats(trades, period = 'all') {
   const now = new Date();
 
   if (period === 'week') {
-    const weekAgo = new Date(now);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    filtered = trades.filter(t => new Date(t.date + 'T00:00:00') >= weekAgo);
+    const weekStart = startOfWeekLocal(now);
+    filtered = trades.filter(t => t.date >= weekStart);
   } else if (period === 'month') {
     filtered = trades.filter(t => {
       const d = new Date(t.date + 'T00:00:00');

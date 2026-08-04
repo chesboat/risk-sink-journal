@@ -11,6 +11,7 @@ import {
   getActiveManualAccounts,
   getArchivedManualAccounts,
   getStrategyAt,
+  startOfWeekLocal,
   SESSIONS,
   SETUPS,
   EMOTIONS,
@@ -45,9 +46,7 @@ export default function Analytics({ state }) {
   const [customEnd, setCustomEnd] = useState('')
   const inRange = (t) => {
     if (range === 'week') {
-      const weekAgo = new Date()
-      weekAgo.setDate(weekAgo.getDate() - 7)
-      return new Date(t.date + 'T00:00:00') >= weekAgo
+      return t.date >= startOfWeekLocal()
     }
     if (range === 'month') {
       const now = new Date()
