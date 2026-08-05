@@ -59,16 +59,34 @@ export function onAuthChange(cb) {
 // The bot_trades and bot_strategy_assignments fetches are wrapped in try/catch
 // so a user who hasn't yet run the latest SQL migration can still load their
 // manual journal — bot data simply comes back empty until the tables exist.
+// Page size for the trades pull. Rows carrying pasted screenshots are
+// megabytes of base64 each; fetching the whole journal in ONE statement
+// tripped Supabase's statement timeout (8s on free tier) and locked the
+// user out with an empty app. Small pages keep every statement cheap.
+const TRADES_PAGE_SIZE = 25;
+
+async function fetchAllTradeRows(userId) {
+  const rows = [];
+  for (let from = 0; ; from += TRADES_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('trades')
+      .select('id, data')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .order('id', { ascending: true }) // stable tiebreak across pages
+      .range(from, from + TRADES_PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < TRADES_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function pullState(userId) {
   if (!supabase || !userId) return null;
 
-  // Fetch user's manual trades
-  const { data: tradeRows, error: tradeErr } = await supabase
-    .from('trades')
-    .select('id, data')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
-  if (tradeErr) throw tradeErr;
+  // Fetch user's manual trades (paged — see TRADES_PAGE_SIZE)
+  const tradeRows = await fetchAllTradeRows(userId);
 
   // Fetch user's config
   const { data: configRow, error: configErr } = await supabase

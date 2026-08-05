@@ -20,7 +20,7 @@ ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all on trades" ON trades;
 DROP POLICY IF EXISTS "Owner only on trades" ON trades;
 CREATE POLICY "Owner only on trades" ON trades
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ───────────────────────────────────────────────
 -- Config (existing) — one row per user, accounts + settings as JSONB
@@ -36,7 +36,7 @@ ALTER TABLE config ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all on config" ON config;
 DROP POLICY IF EXISTS "Owner only on config" ON config;
 CREATE POLICY "Owner only on config" ON config
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ═══════════════════════════════════════════════════
 -- Bot-trade ingestion (new)
@@ -79,7 +79,7 @@ ALTER TABLE bot_trades ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all on bot_trades" ON bot_trades;
 DROP POLICY IF EXISTS "Owner only on bot_trades" ON bot_trades;
 CREATE POLICY "Owner only on bot_trades" ON bot_trades
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ───────────────────────────────────────────────
 -- bot_strategy_assignments: timeline of which strategy ran on which account.
@@ -111,4 +111,4 @@ ALTER TABLE bot_strategy_assignments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all on bot_strategy_assignments" ON bot_strategy_assignments;
 DROP POLICY IF EXISTS "Owner only on bot_strategy_assignments" ON bot_strategy_assignments;
 CREATE POLICY "Owner only on bot_strategy_assignments" ON bot_strategy_assignments
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
