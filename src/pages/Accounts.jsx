@@ -96,7 +96,10 @@ const ProgressBar = ({ percentage, label, color = '#22c55e' }) => (
   </div>
 );
 
-const SlotSelector = ({ value, onChange, label, takenSlots = [] }) => {
+// allowSwap: on the account cards, picking an occupied slot SWAPS the two
+// accounts (rotation is the whole point of the risk sink). In the "add
+// account" modal there's nothing to swap with, so occupied slots stay locked.
+const SlotSelector = ({ value, onChange, label, takenSlots = [], allowSwap = false, occupantName }) => {
   const slots = [1, 2, 3];
   const current = normalizeSlot(value);
 
@@ -106,22 +109,28 @@ const SlotSelector = ({ value, onChange, label, takenSlots = [] }) => {
       <div className="flex gap-2">
         {slots.map((slot) => {
           const taken = takenSlots.includes(slot) && slot !== current;
+          const locked = taken && !allowSwap;
+          const swappable = taken && allowSwap;
           return (
             <motion.button
               key={slot}
-              onClick={() => !taken && onChange(slot)}
-              whileHover={taken ? undefined : { scale: 1.05 }}
-              whileTap={taken ? undefined : { scale: 0.95 }}
-              disabled={taken}
-              title={taken ? 'Slot in use by another active account' : undefined}
+              onClick={() => !locked && onChange(slot)}
+              whileHover={locked ? undefined : { scale: 1.05 }}
+              whileTap={locked ? undefined : { scale: 0.95 }}
+              disabled={locked}
+              title={
+                locked ? 'Slot in use by another active account'
+                  : swappable ? `Swap with ${occupantName?.(slot) || 'the account in this slot'}`
+                    : undefined
+              }
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 current === slot
                   ? 'text-white keep-white'
                   : 'bg-transparent text-gray-400 hover:text-gray-200'
-              } ${taken ? 'opacity-30 cursor-not-allowed' : ''}`}
+              } ${locked ? 'opacity-30 cursor-not-allowed' : ''} ${swappable ? 'border-dashed' : ''}`}
               style={{
                 backgroundColor: current === slot ? SLOT_COLORS[slot] : 'transparent',
-                border: `1px solid ${current === slot ? SLOT_COLORS[slot] : 'var(--border)'}`,
+                border: `1px ${swappable ? 'dashed' : 'solid'} ${current === slot ? SLOT_COLORS[slot] : 'var(--border)'}`,
               }}
             >
               {`E${slot}`}
@@ -129,6 +138,11 @@ const SlotSelector = ({ value, onChange, label, takenSlots = [] }) => {
           );
         })}
       </div>
+      {allowSwap && (
+        <span className="text-[10px] text-gray-500 mt-0.5">
+          Picking an occupied slot swaps the two accounts. Past trades stay with the account that traded them.
+        </span>
+      )}
     </div>
   );
 };
@@ -235,25 +249,10 @@ const EditableField = ({ value, onChange, label, type = 'text', prefix = '' }) =
   );
 };
 
-const AccountCard = ({ account, onUpdate, onArchive, settings, trades, takenSlots }) => {
+const AccountCard = ({ account, onUpdate, onArchive, onMoveSlot, settings, trades, takenSlots, occupantName }) => {
   const stats = getAccountStats(account, trades || [], settings);
 
-  const handleSlotChange = (newSlot) => {
-    const oldSlot = normalizeSlot(account.slot);
-    const updatedAccount = {
-      ...account,
-      slot: newSlot,
-      history: [
-        ...(account.history || []),
-        {
-          date: new Date().toISOString(),
-          from: oldSlot,
-          to: newSlot,
-        },
-      ],
-    };
-    onUpdate(updatedAccount);
-  };
+  const handleSlotChange = (newSlot) => onMoveSlot(account, newSlot);
 
   const handleNameChange = (newName) => {
     onUpdate({ ...account, name: newName });
@@ -295,6 +294,8 @@ const AccountCard = ({ account, onUpdate, onArchive, settings, trades, takenSlot
           onChange={handleSlotChange}
           label="Slot Assignment"
           takenSlots={takenSlots}
+          allowSwap
+          occupantName={occupantName}
         />
 
         {account.activeFrom && (
@@ -1290,6 +1291,38 @@ const Accounts = ({ state, updateAccounts, updateSettings, switchStrategy }) => 
     updateAccounts(updatedAccounts);
   };
 
+  // Move an account to a slot. If another active account is already there,
+  // the two SWAP — written as one update so the accounts array is never
+  // momentarily invalid (two accounts in one slot). Both sides get a history
+  // entry, which is what keeps past trades attributed to the account that
+  // actually traded them (see slotAt() in store.js).
+  const handleMoveSlot = (account, newSlot) => {
+    const target = normalizeSlot(newSlot);
+    const from = normalizeSlot(account.slot);
+    if (target == null || target === from) return;
+    const stamp = new Date().toISOString();
+    const occupant = manualAccounts.find(
+      a => a.id !== account.id && normalizeSlot(a.slot) === target
+    );
+
+    if (occupant && !confirm(
+      `Swap slots?\n\n${account.name}: E${from} → E${target}\n${occupant.name}: E${target} → E${from}\n\n` +
+      `Trades already logged stay with the account that traded them.`
+    )) return;
+
+    const withMove = (acc, to) => ({
+      ...acc,
+      slot: to,
+      history: [...(acc.history || []), { date: stamp, from: normalizeSlot(acc.slot), to }],
+    });
+
+    updateAccounts(state.accounts.map(a => {
+      if (a.id === account.id) return withMove(a, target);
+      if (occupant && a.id === occupant.id) return withMove(a, from);
+      return a;
+    }));
+  };
+
   const handleAddManualAccount = (input) => {
     const newAccount = createManualAccount(input);
     updateAccounts([...state.accounts, newAccount]);
@@ -1360,6 +1393,10 @@ const Accounts = ({ state, updateAccounts, updateSettings, switchStrategy }) => 
                 trades={state.trades}
                 onUpdate={handleAccountUpdate}
                 onArchive={handleArchiveAccount}
+                onMoveSlot={handleMoveSlot}
+                occupantName={(slot) =>
+                  manualAccounts.find(a => normalizeSlot(a.slot) === slot)?.name
+                }
                 settings={state.settings}
                 takenSlots={activeSlots}
               />

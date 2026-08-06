@@ -13,6 +13,7 @@ import {
   getStrategyAt,
   getAllStrategyNames,
   tradeInAccountWindow,
+  accountEntryFor,
 } from '../lib/store'
 
 const WEEKDAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -117,9 +118,10 @@ export default function CalendarPage({ state, openEditTrade }) {
   const manualEntryMatches = (trade, e) => {
     if (!e.triggered) return false
     if (accountId != null) {
-      if (!selectedManualAccount) return false
-      if (e.slot !== selectedManualAccount.slot) return false
-      if (!tradeInAccountWindow(selectedManualAccount, trade)) return false
+      // accountEntryFor honours both the active window and the slot the
+      // account held on that date, so rotations don't re-label old trades
+      const owned = accountEntryFor(selectedManualAccount, trade)
+      if (!owned || owned !== e) return false
     }
     if (instrument && trade.instrument !== instrument) return false
     return true
@@ -127,11 +129,7 @@ export default function CalendarPage({ state, openEditTrade }) {
   const manualTradeMatches = (trade) => {
     if (source === 'bot') return false
     if (instrument && trade.instrument !== instrument) return false
-    if (accountId != null) {
-      if (!selectedManualAccount) return false
-      if (!tradeInAccountWindow(selectedManualAccount, trade)) return false
-      return trade.entries.some(e => e.triggered && e.slot === selectedManualAccount.slot)
-    }
+    if (accountId != null) return !!accountEntryFor(selectedManualAccount, trade)
     return trade.entries.some(e => e.triggered)
   }
   const manualPnl = (trade) => trade.entries.reduce(

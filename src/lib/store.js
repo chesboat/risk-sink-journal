@@ -159,17 +159,21 @@ export function buildAIMarkdown(state) {
     const sign = n >= 0 ? '+' : '-';
     return `${sign}$${Math.abs(Math.round(n)).toLocaleString()}`;
   };
-  const slotName = (slot) => {
-    const acct = getActiveManualAccounts(accounts).find(a => a.slot === slot)
-      || accounts.find(a => a.slot === slot);
-    return acct ? acct.name : `Slot ${slot}`;
+  // Which account held this slot on this date (slots can be rotated)
+  const slotName = (slot, date) => {
+    const s = normalizeSlot(slot);
+    const held = accounts.find(a =>
+      (!date || tradeInAccountWindow(a, { date })) && slotAt(a, date) === s
+    );
+    return held ? held.name : `Slot ${s}`;
   };
   const cleanText = (s) => (s || '').replace(/\s+/g, ' ').trim();
 
   // Per-account totals (each account only owns trades in its active window)
   const perAccount = accounts.map(a => {
-    const triggered = sorted.filter(t => tradeInAccountWindow(a, t))
-      .flatMap(t => (t.entries || []).filter(e => e.slot === a.slot && e.triggered));
+    const triggered = sorted
+      .map(t => accountEntryFor(a, t))
+      .filter(Boolean);
     const wins = triggered.filter(e => e.result === 'W');
     const losses = triggered.filter(e => e.result === 'L');
     const bes = triggered.filter(e => e.result === 'BE');
@@ -319,7 +323,7 @@ export function buildAIMarkdown(state) {
                  : e.triggered && e.result === 'BE' ? '0'
                  : '—';
         const pv = e.triggered ? fmt$(e.pnl || 0) : '—';
-        lines.push(`| E${e.slot} | ${slotName(e.slot)} | ${tr} | ${rs} | ${rv} | ${pv} |`);
+        lines.push(`| E${e.slot} | ${slotName(e.slot, t.date)} | ${tr} | ${rs} | ${rv} | ${pv} |`);
       });
       lines.push('');
 
@@ -1089,10 +1093,13 @@ export function calcPooledHealth(trades, accounts, settings) {
   const initialCombinedFloor = acctState.reduce((s, st) => s + floorOf(st.peak), 0)
   const curve = [{ date: null, combined: running, floor: initialCombinedFloor }]
   sorted.forEach((t) => {
+    // Map each entry to whichever account held that slot ON THIS TRADE'S DATE,
+    // so a slot rotation doesn't retroactively move equity between curves.
     const dayDelta = (t.entries || []).reduce((s, e) => {
       if (!e.triggered) return s
-      const idx = acctState.findIndex((st) => st.slot === e.slot)
-      if (idx >= 0 && !tradeInAccountWindow(accts[idx], t)) return s
+      const idx = accts.findIndex(a =>
+        tradeInAccountWindow(a, t) && slotAt(a, t.date) === normalizeSlot(e.slot)
+      )
       if (idx >= 0) {
         acctState[idx].running += e.pnl || 0
         if (acctState[idx].running > acctState[idx].peak) {
@@ -1215,7 +1222,7 @@ export function calcTrailingMll(account, trades, settings) {
   let running = seed
   let peak = seed
   sorted.forEach((t) => {
-    const e = (t.entries || []).find((x) => x.slot === account.slot && x.triggered)
+    const e = accountEntryFor(account, t)
     if (!e) return
     running += e.pnl || 0
     if (running > peak) peak = running
@@ -1248,9 +1255,12 @@ export function calcTrailingMll(account, trades, settings) {
 }
 
 // ── Account Helpers ──
+// slot-only variant, kept for callers that genuinely mean "the E-slot"
+// rather than "the account currently in it".
 export function getAccountPnl(trades, slot) {
+  const s = normalizeSlot(slot);
   return trades.reduce((sum, t) => {
-    const entry = t.entries.find(e => e.slot === slot && e.triggered);
+    const entry = t.entries.find(e => normalizeSlot(e.slot) === s && e.triggered);
     return sum + (entry ? (entry.pnl || 0) : 0);
   }, 0);
 }
@@ -1259,7 +1269,11 @@ export function getAccountStats(account, trades, settings) {
   const s = settings || { mll: 2000, profitTarget: 3000, accountSize: 50000 };
   // Only trades inside this account's active window count toward its stats
   const owned = getTradesForAccount(account, trades);
-  const journalPnl = getAccountPnl(owned, account.slot);
+  // Attribution is slot-at-the-time, so rotating slots never rewrites history
+  const journalPnl = owned.reduce((sum, t) => {
+    const e = accountEntryFor(account, t);
+    return sum + (e ? (e.pnl || 0) : 0);
+  }, 0);
   const totalPnl = (account.startingPnl || 0) + journalPnl;
 
   // Trailing MLL: uses chronological peak tracking per account
@@ -1268,7 +1282,9 @@ export function getAccountStats(account, trades, settings) {
   const ptProgress = Math.max(0, totalPnl);
   const ptLeft = s.profitTarget - ptProgress;
 
-  const entries = owned.flatMap(t => t.entries.filter(e => e.slot === account.slot && e.triggered && e.result));
+  const entries = owned
+    .map(t => accountEntryFor(account, t))
+    .filter(e => e && e.result);
   const wins = entries.filter(e => e.result === 'W');
   const slotWR = entries.length > 0 ? wins.length / entries.length : 0;
 
@@ -1296,7 +1312,7 @@ export function getAccountStats(account, trades, settings) {
   let ddPeak = running;
   let maxDrawdown = 0;
   chrono.forEach(t => {
-    const e = (t.entries || []).find(x => x.slot === account.slot && x.triggered);
+    const e = accountEntryFor(account, t);
     if (!e) return;
     running += Number(e.pnl) || 0;
     if (running > ddPeak) ddPeak = running;
@@ -1444,6 +1460,51 @@ export function tradeInAccountWindow(account, trade) {
 
 export function getTradesForAccount(account, trades) {
   return (trades || []).filter(t => tradeInAccountWindow(account, t));
+}
+
+// Slot values have been stored as numbers (1) and, by an older selector, as
+// strings ('E1'). Normalize before comparing.
+export function normalizeSlot(slot) {
+  const n = Number(String(slot).replace(/^E/i, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// ── Slot timeline ──
+// Rotating an account between slots (E1 ⇄ E3) must NOT rewrite history: the
+// trades it took while sitting in E1 stay its E1 trades. account.slot is only
+// where it sits TODAY; account.history records every move as
+// { date, from, to }. This replays that timeline to answer "which slot did
+// this account occupy on <date>?".
+//
+// Granularity is one day (trades carry a date, not a time), so a move is
+// treated as effective for trades dated on or after the move.
+export function slotAt(account, dateStr) {
+  const moves = (account?.history || [])
+    .filter(h => h && h.date && h.to != null)
+    .map(h => ({ day: String(h.date).slice(0, 10), from: normalizeSlot(h.from), to: normalizeSlot(h.to) }))
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+
+  if (moves.length === 0) return normalizeSlot(account?.slot);
+  if (!dateStr) return normalizeSlot(account?.slot);
+
+  // Before the first recorded move, the account sat in that move's `from`.
+  let slot = moves[0].from ?? normalizeSlot(account?.slot);
+  for (const m of moves) {
+    if (dateStr >= m.day) slot = m.to;
+    else break;
+  }
+  return slot;
+}
+
+// The triggered entry belonging to `account` on `trade`, honouring both the
+// account's active window and the slot it held that day. Returns null when
+// the account didn't participate in that idea.
+export function accountEntryFor(account, trade) {
+  if (!account || !trade) return null;
+  if (!tradeInAccountWindow(account, trade)) return null;
+  const slot = slotAt(account, trade.date);
+  if (slot == null) return null;
+  return (trade.entries || []).find(e => normalizeSlot(e.slot) === slot && e.triggered) || null;
 }
 
 export function createManualAccount({ name, slot, startingPnl = 0 } = {}) {
