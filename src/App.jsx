@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles, FileDown, History } from 'lucide-react'
+import { LayoutDashboard, Calendar, PenLine, BarChart3, Users, Moon, Sun, Plus, Download, Upload, Cloud, CloudOff, LogOut, AlertCircle, X, Sparkles, FileDown, History, Layers } from 'lucide-react'
 import { getDefaultState, createTrade, exportData, exportForAI, importData, createStrategyAssignment } from './lib/store'
 import {
   isSupabaseConfigured,
@@ -22,6 +22,7 @@ import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/CalendarPage'
 import TradeLog from './pages/TradeLog'
 import Analytics from './pages/Analytics'
+import RiskSink from './pages/RiskSink'
 import Accounts from './pages/Accounts'
 import ImportBotTrades from './pages/ImportBotTrades'
 import TradeModal from './components/TradeModal'
@@ -35,6 +36,7 @@ const NAV = [
   { id: 'calendar', label: 'Calendar', icon: Calendar },
   { id: 'tradelog', label: 'Trade Log', icon: PenLine },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'risksink', label: 'Risk Sink', icon: Layers },
   { id: 'accounts', label: 'Accounts', icon: Users },
   { id: 'import', label: 'Import Bot', icon: FileDown },
 ]
@@ -499,6 +501,7 @@ export default function App() {
       case 'calendar': return <CalendarPage {...props} />
       case 'tradelog': return <TradeLog {...props} />
       case 'analytics': return <Analytics {...props} />
+      case 'risksink': return <RiskSink {...props} />
       case 'accounts': return <Accounts {...props} />
       case 'import': return <ImportBotTrades {...props} />
       default: return <Dashboard {...props} />
