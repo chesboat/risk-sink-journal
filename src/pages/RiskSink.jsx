@@ -4,9 +4,9 @@ import {
   ResponsiveContainer, ComposedChart, LineChart, AreaChart, BarChart,
   Line, Area, Bar, Cell, XAxis, YAxis, Tooltip, ReferenceLine, CartesianGrid,
 } from 'recharts'
-import { Layers, Info, X, ShieldCheck, Dices, Activity, GitBranch, Scale, Ruler, TrendingUp } from 'lucide-react'
+import { Layers, Info, X, ShieldCheck, Dices, Activity, GitBranch, Scale, Ruler, TrendingUp, Gauge, HelpCircle } from 'lucide-react'
 import { formatPnl, ENTRY_COLORS } from '../lib/store'
-import { calcRiskSinkReport, bootstrapLift, monteCarloSurvival } from '../lib/riskSink'
+import { calcRiskSinkReport, bootstrapLift, monteCarloSurvival, riskLadder } from '../lib/riskSink'
 
 // ── Palette for the three worlds ──
 const C = {
@@ -27,31 +27,40 @@ const tickFor = (isR) => (v) => (isR ? `${v}R` : fmtK(v))
 const X_TICK = { tick: { fill: 'var(--text-muted)', fontSize: 10 }, axisLine: false, tickLine: false, minTickGap: 24, interval: 'preserveStartEnd' }
 
 // ── Shared bits ──
-const Card = ({ title, icon: Icon, subtitle, right, children, delay = 0, className = '' }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 16 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.45, delay }}
-    className={`rounded-[14px] p-5 border ${className}`}
-    style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
-  >
-    {(title || right) && (
-      <div className="flex items-start justify-between mb-1 gap-3">
-        <div>
-          {title && (
-            <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text)' }}>
-              {Icon && <Icon size={16} style={{ color: 'var(--accent)' }} />}
-              {title}
-            </h3>
-          )}
-          {subtitle && <p className="text-xs opacity-50 mt-0.5">{subtitle}</p>}
+// Every card takes an optional `info` node: an (i) button appears in the
+// header and toggles a plain-English explanation of what the card shows.
+const Card = ({ title, icon: Icon, subtitle, right, info, children, delay = 0, className = '' }) => {
+  const [showInfo, setShowInfo] = useState(false)
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay }}
+      className={`rounded-[14px] p-5 border ${className}`}
+      style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+    >
+      {(title || right || info) && (
+        <div className="flex items-start justify-between mb-1 gap-3">
+          <div>
+            {title && (
+              <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text)' }}>
+                {Icon && <Icon size={16} style={{ color: 'var(--accent)' }} />}
+                {title}
+              </h3>
+            )}
+            {subtitle && <p className="text-xs opacity-50 mt-0.5">{subtitle}</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            {right}
+            {info && <InfoToggle open={showInfo} onToggle={() => setShowInfo(v => !v)} />}
+          </div>
         </div>
-        {right}
-      </div>
-    )}
-    {children}
-  </motion.div>
-)
+      )}
+      {info && showInfo && <InfoBox>{info}</InfoBox>}
+      {children}
+    </motion.div>
+  )
+}
 
 const ChartTip = ({ active, payload, label, fmt, labelFmt, omit = [] }) => {
   if (!active || !payload?.length) return null
@@ -217,7 +226,13 @@ function HeroCard({ report, unit }) {
 function FunnelCard({ report }) {
   const { funnel, n } = report
   return (
-    <Card title="How deep do ideas go?" icon={GitBranch} subtitle="Share of completed ideas where each entry got filled" delay={0.05}>
+    <Card title="How deep do ideas go?" icon={GitBranch} subtitle="Share of completed ideas where each entry got filled" delay={0.05}
+      info={<>
+        E1 fills on every idea (it's your first entry). E2 fills only when price runs deeper to
+        your second level, E3 deeper still. So these bars show how often the market actually
+        gives you the discount the sink is designed to catch. If E2/E3 rarely fill, the sink
+        rarely gets to do its job — most ideas end up one-account-deep.
+      </>}>
       <div className="space-y-3 mt-3">
         {funnel.map(f => (
           <div key={f.slot}>
@@ -243,7 +258,18 @@ function FunnelCard({ report }) {
 function DepthCard({ report }) {
   const { byDepth } = report
   return (
-    <Card title="Outcome by depth" icon={Ruler} subtitle="Win rate you have vs. the win rate each depth needs to break even" delay={0.1}>
+    <Card title="Outcome by depth" icon={Ruler} subtitle="Win rate you have vs. the win rate each depth needs to break even" delay={0.1}
+      info={<>
+        Each row groups ideas by how many entries filled. Reading the columns:
+        <span className="font-semibold"> Ideas</span> — how many landed in this group (and its share of all ideas).
+        <span className="font-semibold"> Win rate</span> — how often this group won.
+        <span className="font-semibold"> Break-even</span> — the win rate this group would NEED, given its
+        average win and loss, just to make $0. Example: if wins average +11R and losses −3R,
+        winning just 21% of the time breaks even.
+        <span className="font-semibold"> Win rate green</span> = you're above that hurdle and this depth is
+        profitable; red = below it. Deep ideas can have a LOW win rate and still be your most
+        profitable group — that's the whole trade-off of adding size near the stop.
+      </>}>
       <div className="overflow-x-auto mt-2">
         <table className="w-full text-xs">
           <thead>
@@ -292,7 +318,15 @@ function DepthCard({ report }) {
 function SlotRCard({ report }) {
   const { bySlot, rHistogram } = report
   return (
-    <Card title="Deeper entries, bigger R" icon={TrendingUp} subtitle="Winning R by entry slot — the engine behind the lift" delay={0.15}>
+    <Card title="Deeper entries, bigger R" icon={TrendingUp} subtitle="Winning R by entry slot — the engine behind the lift" delay={0.15}
+      info={<>
+        R = how many times your risk a win paid. You risk the same $200 on every entry, but E2/E3
+        enter closer to the stop — so the same move to target is worth more multiples of that $200.
+        A 3R win at E1 pays $600; if E3 catches the same move at 5R it pays $1,000 for the same risk.
+        The boxes show each slot's average winning R; the chart shows every winning entry bucketed
+        by R. If the E2/E3 bars sit to the right of E1's, the "deeper = bigger payoff" engine is
+        working. Their win rates will naturally be a bit lower — deeper fills are nearer the stop.
+      </>}>
       <div className="grid grid-cols-3 gap-2 mt-2 mb-3">
         {bySlot.map(s => (
           <div key={s.slot} className="rounded-lg px-3 py-2" style={{ background: 'var(--surface)' }}>
@@ -329,7 +363,17 @@ function LedgerCard({ report }) {
   ]
   const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.value)))
   return (
-    <Card title="Where the lift comes from" icon={Scale} subtitle="The honest ledger — what the stagger earned and what it cost, vs. copied ×3" delay={0.2}>
+    <Card title="Where the lift comes from" icon={Scale} subtitle="The honest ledger — what the stagger earned and what it cost, vs. copied ×3" delay={0.2}
+      info={<>
+        Every idea is compared against "what if I'd copied E1 to all three accounts instead of
+        staggering". Three buckets:
+        <span className="font-semibold"> Winners, stagger ahead</span> — deep fills beat copying (green: this is what the sink is for).
+        <span className="font-semibold"> Winners, copying ahead</span> — the idea won but only E1 filled, so two accounts
+        sat idle; copying would have tripled the win. This is the price you pay for waiting for depth.
+        <span className="font-semibold"> Losers</span> — with a shared stop, a shallow loser costs 1×$200 while copying
+        loses 3×$200, so unfilled entries SAVE money on losers.
+        The net of all three is the verdict number at the top of the page.
+      </>}>
       <div className="space-y-3 mt-3">
         {rows.map(r => (
           <div key={r.label}>
@@ -360,6 +404,13 @@ function RollingCard({ report, unit }) {
   const last = rolling[rolling.length - 1]
   return (
     <Card title="Is the edge stable?" icon={Activity} subtitle="Lift over the last 30 ideas, rolling — same window as the Risk Sink Score" delay={0.25}
+      info={<>
+        Each bar answers: "counting only the 30 ideas up to this point, was the stagger beating
+        copied ×3?" Green bars = the sink was ahead over that stretch; red = behind. What to look
+        for is the trend, not any single bar: mostly green and steady means the edge is holding;
+        a long red run means the recent market hasn't been giving you the deep-then-reverse moves
+        the sink feeds on. It uses the same 30-idea window as the Risk Sink Score, so the two move together.
+      </>}
       right={last && <span className="text-sm font-mono font-bold" style={{ color: last[k] > 0 ? 'var(--green)' : last[k] < 0 ? 'var(--red)' : 'var(--text-dim)' }}>{f(last[k])}<span className="text-[11px] opacity-50 font-sans font-normal ml-1">now</span></span>}>
       <div style={{ height: 160 }} className="mt-2">
         <ResponsiveContainer width="100%" height="100%">
@@ -384,7 +435,6 @@ function RollingCard({ report, unit }) {
 
 // ── Robustness: bootstrap ──
 function BootstrapCard({ report, unit }) {
-  const [showInfo, setShowInfo] = useState(false)
   const isR = unit === 'R'
   const f = isR ? fmtR : formatPnl
   const boot = useMemo(() => bootstrapLift(report.ideas, { key: isR ? 'liftR' : 'liftPnl' }), [report.ideas, isR])
@@ -399,15 +449,15 @@ function BootstrapCard({ report, unit }) {
   const color = report.n < 10 ? 'var(--text-dim)' : p >= 0.8 ? 'var(--green)' : p >= 0.5 ? 'var(--orange)' : 'var(--red)'
   return (
     <Card title="Is the lift real or luck?" icon={Dices} subtitle="Your ideas reshuffled 1,000 times — where the lift lands" delay={0.3}
-      right={<InfoToggle open={showInfo} onToggle={() => setShowInfo(v => !v)} />}>
-      {showInfo && (
-        <InfoBox>
-          A bootstrap: resample your own ideas with replacement, 1,000 times, and replay the lift each
-          time. The band is the 5th–95th percentile of those replays; the dashed line is the median;
-          the solid line is what actually happened. If the whole band sits above zero, the stagger's
-          edge survives reshuffling — it isn't a lucky ordering of a few big ideas.
-        </InfoBox>
-      )}
+      info={<>
+        A small lift can come from two or three lucky ideas. To check, this takes your own ideas,
+        shuffles them into 1,000 alternate histories (drawing with replacement), and replays the
+        lift in each one. The shaded band is where 90% of those replays landed (5th to 95th
+        percentile), the dashed line is the typical (median) replay, and the solid line is what
+        actually happened. How to read it: if even the BOTTOM of the band ends above zero, the
+        edge survives reshuffling — it isn't riding on a few lucky ideas. The big percentage is
+        simply how many of the 1,000 replays ended positive.
+      </>}>
       <div className="flex items-baseline gap-3 mb-2">
         <span className="text-2xl font-extrabold font-mono" style={{ color }}>{report.n ? pct(p) : '—'}</span>
         <span className="text-xs" style={{ color: 'var(--text)' }}>of replays end with a positive lift <span className="opacity-50">· {verdict}</span></span>
@@ -441,7 +491,6 @@ function BootstrapCard({ report, unit }) {
 // ── Robustness: Monte Carlo account survival ──
 function SurvivalCard({ report, settings }) {
   const [horizon, setHorizon] = useState(50)
-  const [showInfo, setShowInfo] = useState(false)
   const mll = settings?.mll || 2000
   const mc = useMemo(() => monteCarloSurvival(report.ideas, { horizon, mll, riskPerEntry: report.riskPerEntry }), [report.ideas, horizon, mll, report.riskPerEntry])
   if (!mc) return null
@@ -460,25 +509,24 @@ function SurvivalCard({ report, settings }) {
     <Card title="Will the accounts survive?" icon={ShieldCheck}
       subtitle={`Next ${horizon} ideas, resampled 1,000× from your history · $${mll.toLocaleString()} max loss per account`} delay={0.35}
       right={
-        <div className="flex items-center gap-2">
-          <div className="flex gap-0.5 p-0.5 rounded-md" style={{ background: 'var(--surface)' }}>
-            {[25, 50, 100].map(h => (
-              <button key={h} onClick={() => setHorizon(h)} className="px-2 py-0.5 rounded text-[11px] font-semibold border-0 cursor-pointer"
-                style={{ background: horizon === h ? 'var(--card)' : 'transparent', color: horizon === h ? 'var(--text)' : 'var(--text-dim)' }}>{h}</button>
-            ))}
-          </div>
-          <InfoToggle open={showInfo} onToggle={() => setShowInfo(v => !v)} />
+        <div className="flex gap-0.5 p-0.5 rounded-md" style={{ background: 'var(--surface)' }}>
+          {[25, 50, 100].map(h => (
+            <button key={h} onClick={() => setHorizon(h)} className="px-2 py-0.5 rounded text-[11px] font-semibold border-0 cursor-pointer"
+              style={{ background: horizon === h ? 'var(--card)' : 'transparent', color: horizon === h ? 'var(--text)' : 'var(--text-dim)' }}>{h}</button>
+          ))}
         </div>
-      }>
-      {showInfo && (
-        <InfoBox>
-          Each simulated future draws {horizon} ideas at random from your journal. Under the sink,
-          account 1 gets E1's result, account 2 gets E2's, account 3 gets E3's — exactly as your
-          slots work. Under copied, all three accounts get E1's result. An account busts when its
-          equity falls ${mll.toLocaleString()} below its own peak. This is the prop-firm view of
-          the sink: not "did I make more" but "how often do I lose an account".
-        </InfoBox>
-      )}
+      }
+      info={<>
+        This simulates your next {horizon} ideas, 1,000 times, by drawing randomly from ideas
+        you've already logged (the 25/50/100 buttons set how far ahead to look). Under the sink,
+        account 1 gets E1's result, account 2 gets E2's, account 3 gets E3's — exactly how your
+        slots work. Under copied, all three accounts take E1's result. An account "busts" when it
+        falls ${mll.toLocaleString()} below its own high-water mark, like a prop-firm trailing
+        drawdown. This is the prop-firm view of the sink: not "did I make more?" but "how often
+        do I lose an account?" — the sink's quiet superpower is that unfilled entries mean two
+        accounts often sit out the losers. "10th pct" = a bad run (only 1 in 10 futures is worse);
+        "90th pct" = a good run.
+      </>}>
       <div className="grid grid-cols-2 gap-3 mb-3 mt-2">
         <div className="rounded-lg px-3 py-3" style={{ background: 'var(--surface)' }}>
           <div className="text-[11px] opacity-60">Sink · chance of losing ≥1 account</div>
@@ -511,12 +559,107 @@ function SurvivalCard({ report, settings }) {
   )
 }
 
+// ── Risk headroom: what per-entry risk does your history support? ──
+// Deliberately framed as a CEILING at a bust tolerance the trader picks, not
+// a recommendation to size up. Quiet by design: no nudges, no alerts.
+function HeadroomCard({ report, settings }) {
+  const [tolerance, setTolerance] = useState(0.05)
+  const mll = settings?.mll || 2000
+  const current = report.riskPerEntry
+  const ladder = useMemo(
+    () => riskLadder(report.ideas, { mll, riskPerEntry: current, maxBust: tolerance }),
+    [report.ideas, mll, current, tolerance]
+  )
+  if (!ladder) return null
+  const data = ladder.rows.map(r => ({ ...r, bustPct: r.pAnyBust * 100 }))
+  const currentRow = ladder.rows.find(r => r.risk === current)
+  const small = report.n < 30
+  const safe = ladder.safeRisk
+
+  return (
+    <Card title="How much risk does your history support?" icon={Gauge}
+      subtitle={`Same ideas replayed at other $-per-entry sizes · $${mll.toLocaleString()} trailing drawdown · next ${ladder.horizon} ideas`}
+      delay={0.4}
+      right={
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] opacity-50">bust chance I'd accept</span>
+          <div className="flex gap-0.5 p-0.5 rounded-md" style={{ background: 'var(--surface)' }}>
+            {[0.02, 0.05, 0.10].map(t => (
+              <button key={t} onClick={() => setTolerance(t)} className="px-2 py-0.5 rounded text-[11px] font-semibold border-0 cursor-pointer"
+                style={{ background: tolerance === t ? 'var(--card)' : 'transparent', color: tolerance === t ? 'var(--text)' : 'var(--text-dim)' }}>{Math.round(t * 100)}%</button>
+            ))}
+          </div>
+        </div>
+      }
+      info={<>
+        Because you always risk a fixed dollar amount per entry, your whole history scales cleanly:
+        at $300 per entry every win and loss would simply have been 1.5× its logged size. This card
+        replays your ideas 800 times at each size on the ladder ($100–$500) and asks: at this size,
+        how often does an account's trailing drawdown hit ${mll.toLocaleString()} within the next
+        {' '}{ladder.horizon} ideas? The headline is the LARGEST size that stays under the bust
+        chance you selected above. Read it as a ceiling your data can currently justify — not a
+        target, and not advice. It assumes the future resembles your logged past, so it deserves
+        more trust as the idea count grows, and less right after a change in market or style.
+        Two honest asymmetries to keep in mind: a busted account costs a reset fee and weeks of
+        rebuilding, while extra size only adds marginal dollars; and this can't see risks that
+        aren't in your history yet.
+      </>}>
+
+      <div className="flex items-baseline gap-3 mb-1 mt-1 flex-wrap">
+        {safe ? (
+          <>
+            <span className="text-3xl font-extrabold font-mono" style={{ color: safe > current ? 'var(--green)' : safe < current ? 'var(--orange)' : 'var(--text)' }}>
+              ${safe}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--text)' }}>
+              per entry is the most your history supports at a {Math.round(tolerance * 100)}% bust chance
+              <span className="opacity-60"> · you risk ${current} now{currentRow ? ` (${Math.round(currentRow.pAnyBust * 100)}% bust chance)` : ''}</span>
+            </span>
+          </>
+        ) : (
+          <span className="text-sm" style={{ color: 'var(--red)' }}>
+            Even ${ladder.rows[0].risk} per entry exceeds a {Math.round(tolerance * 100)}% bust chance on this history — the drawdowns in your data are too large for that tolerance.
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] opacity-50 mb-3">
+        A ceiling, not a target — staying under it is the point.{small ? ` Only ${report.n} ideas so far: treat this as a rough sketch until ~30+.` : ''}
+      </p>
+
+      <div style={{ height: 170 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
+            <CartesianGrid stroke="var(--border)" vertical={false} />
+            <XAxis dataKey="risk" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+            <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => `${v}%`} allowDecimals={false} />
+            <Tooltip content={<ChartTip fmt={(v) => `${(+v).toFixed(1)}%`} labelFmt={(l) => `$${l} risked per entry`} />} cursor={{ stroke: 'var(--border-hover)' }} />
+            <ReferenceLine y={tolerance * 100} stroke="var(--red)" strokeDasharray="4 3" label={{ value: `${Math.round(tolerance * 100)}% tolerance`, position: 'insideTopRight', fill: 'var(--red)', fontSize: 10 }} />
+            <ReferenceLine x={current} stroke="var(--accent)" strokeDasharray="3 3" label={{ value: 'you', position: 'insideTopLeft', fill: 'var(--accent)', fontSize: 10 }} />
+            <Line type="monotone" dataKey="bustPct" name="Chance of losing ≥1 account" stroke="var(--orange)" strokeWidth={2} dot={{ r: 3, fill: 'var(--orange)', strokeWidth: 0 }} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mt-3">
+        <Stat label={`At $${current} (now)`} value={currentRow ? `${Math.round(currentRow.pAnyBust * 100)}%` : '—'} sub="bust chance" />
+        <Stat label={safe ? `At $${safe} (ceiling)` : 'Ceiling'} value={safe ? `${Math.round((ladder.rows.find(r => r.risk === safe)?.pAnyBust || 0) * 100)}%` : '—'} sub="bust chance" />
+        <Stat label={safe && currentRow ? 'Median P&L at ceiling' : 'Median P&L'} value={safe ? formatPnl(ladder.rows.find(r => r.risk === safe)?.medianPnl || 0) : currentRow ? formatPnl(currentRow.medianPnl) : '—'} sub={`over ${ladder.horizon} ideas, pooled`} />
+      </div>
+    </Card>
+  )
+}
+
 // ── Secondary: by instrument ──
 function InstrumentCard({ report }) {
   const { byInstrument } = report
   if (byInstrument.length < 2) return null
   return (
-    <Card title="Lift by instrument" icon={Layers} delay={0.4}>
+    <Card title="Lift by instrument" icon={Layers} delay={0.4}
+      info={<>
+        The same sink-vs-copied comparison, split by what you traded. A strongly negative lift on
+        one instrument with a positive lift on another suggests the stagger suits how one market
+        moves (deep pullbacks that reverse) better than the other — worth watching once each row
+        has a few dozen ideas, meaningless before that.
+      </>}>
       <table className="w-full mt-2">
         <thead>
           <tr className="text-[11px] opacity-50 text-left">
@@ -548,6 +691,7 @@ export default function RiskSink({ state }) {
   const [unit, setUnit] = useState('$')
   const [from, setFrom] = useState('')
   const [excludeRescues, setExcludeRescues] = useState(false)
+  const [showPrimer, setShowPrimer] = useState(false)
 
   const report = useMemo(
     () => calcRiskSinkReport(state.trades || [], state.settings, { from, excludeRescues }),
@@ -570,7 +714,14 @@ export default function RiskSink({ state }) {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-[26px] font-extrabold tracking-tight" style={{ color: 'var(--text)' }}>Risk Sink</h1>
-          <p className="text-xs opacity-60 mt-0.5">One question: what does staggering into three accounts actually buy you?</p>
+          <p className="text-xs opacity-60 mt-0.5">
+            One question: what does staggering into three accounts actually buy you?
+            <button onClick={() => setShowPrimer(v => !v)}
+              className="ml-2 inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-xs font-semibold"
+              style={{ color: 'var(--accent)' }}>
+              <HelpCircle size={12} /> {showPrimer ? 'hide the primer' : 'what am I looking at?'}
+            </button>
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <label className="flex items-center gap-2 text-xs opacity-80">
@@ -589,6 +740,35 @@ export default function RiskSink({ state }) {
           <Toggle value={unit} options={['$', 'R']} onChange={setUnit} />
         </div>
       </div>
+
+      {showPrimer && (
+        <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+          className="rounded-[14px] p-5 border text-xs leading-relaxed space-y-2"
+          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}>
+          <p className="font-semibold text-sm">The one idea behind this page</p>
+          <p>
+            Every trade idea you log secretly contains an experiment. E1 is the entry you'd take no
+            matter what — so we can ask: what did staggering E2/E3 deeper actually change, compared
+            to just copying E1 into all three accounts?
+          </p>
+          <p>
+            <span className="font-semibold" style={{ color: C.actual }}>Sink</span> — what really happened: every entry that filled, added up.<br />
+            <span className="font-semibold" style={{ color: C.copied }}>Copied ×3</span> — the alternative you: E1's result times three, because all three accounts took the same first entry. This is the fair benchmark — same budget, same idea, no stagger.<br />
+            <span className="font-semibold">Single</span> — one account taking only E1, shown for scale.<br />
+            <span className="font-semibold" style={{ color: C.lift }}>Lift</span> — sink minus copied. The page's verdict number. Positive = the stagger is earning its keep.
+          </p>
+          <p>
+            <span className="font-semibold">R</span> is your unit of risk: 1R = the $200 you risk per entry. A "+4R" win made 4 × $200 = $800.
+            <span className="font-semibold"> Drawdown</span> is how far an equity curve has fallen from its highest point — what prop firms actually measure you on.
+            <span className="font-semibold"> Percentiles</span> (5th/50th/95th) are just "bad run / typical / good run" across many simulated replays.
+          </p>
+          <p className="opacity-70">
+            The page reads top to bottom: the verdict (did the sink pay?), then why (which mechanics
+            produced it), then whether to believe it (luck checks and account-survival odds). Every
+            card has an <Info size={11} className="inline" /> button with a plain-English explanation.
+          </p>
+        </motion.div>
+      )}
 
       {report.n === 0 ? (
         <Card>
@@ -624,8 +804,11 @@ export default function RiskSink({ state }) {
               <RollingCard report={report} unit={unit} />
               <BootstrapCard report={report} unit={unit} />
             </div>
-            <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: '3fr 2fr' }}>
+            <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
               <SurvivalCard report={report} settings={state.settings} />
+              <HeadroomCard report={report} settings={state.settings} />
+            </div>
+            <div className="mt-4">
               <InstrumentCard report={report} />
             </div>
           </div>

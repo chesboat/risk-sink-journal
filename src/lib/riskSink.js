@@ -185,6 +185,63 @@ export function monteCarloSurvival(ideas, { horizon = 50, B = 1000, seed = 11, m
   return { horizon, mll, sink: run('sink'), copied: run('copied') }
 }
 
+// ── Risk ladder ──
+// Replays history at different $-risk-per-entry sizes. With fixed-$ sizing,
+// per-entry P&L scales linearly with the risk amount (double the risk, double
+// the contracts), so each rung reruns the survival Monte Carlo with scaled
+// P&L against the SAME resampled idea sequences (same seed → rungs differ
+// only by size, not by luck). This is a ceiling gauge — the largest risk your
+// own history supports at a given bust tolerance — not a recommendation.
+export function riskLadder(ideas, { mll = 2000, horizon = 50, B = 800, seed = 13, riskPerEntry = DEFAULT_RISK, risks, maxBust = 0.05 } = {}) {
+  const n = ideas.length
+  if (n === 0) return null
+  const rungs = risks || [100, 150, 200, 250, 300, 350, 400, 450, 500]
+  if (!rungs.includes(riskPerEntry)) rungs.push(riskPerEntry)
+  rungs.sort((a, b) => a - b)
+
+  const rows = rungs.map(risk => {
+    const scale = risk / riskPerEntry
+    const rand = mulberry32(seed)
+    let anyBust = 0
+    let bustCount = 0
+    const finals = []
+    for (let b = 0; b < B; b++) {
+      const eq = [0, 0, 0], peak = [0, 0, 0], bust = [false, false, false]
+      let pooled = 0
+      for (let h = 0; h < horizon; h++) {
+        const idea = ideas[Math.floor(rand() * n)]
+        for (let a = 0; a < 3; a++) {
+          const pnl = idea.perSlot[a + 1].pnl * scale
+          eq[a] += pnl
+          peak[a] = Math.max(peak[a], eq[a])
+          if (!bust[a] && peak[a] - eq[a] >= mll) bust[a] = true
+          pooled += pnl
+        }
+      }
+      const busted = bust.filter(Boolean).length
+      if (busted > 0) anyBust++
+      bustCount += busted
+      finals.push(pooled)
+    }
+    finals.sort((a, b) => a - b)
+    return {
+      risk,
+      pAnyBust: anyBust / B,
+      expectedBusts: bustCount / B,
+      medianPnl: quantile(finals, 0.5),
+      p10Pnl: quantile(finals, 0.1),
+    }
+  })
+
+  // Largest rung whose bust chance stays within tolerance. Monotonic in
+  // practice, but scan from the top so a noisy dip can't inflate the answer.
+  let safeRisk = null
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].pAnyBust <= maxBust) { safeRisk = rows[i].risk; break }
+  }
+  return { rows, safeRisk, maxBust, horizon, mll, currentRisk: riskPerEntry }
+}
+
 // ── The full report ──
 export function calcRiskSinkReport(trades, settings = {}, opts = {}) {
   const riskPerEntry = settings.riskPerEntry || DEFAULT_RISK
